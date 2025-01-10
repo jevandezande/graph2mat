@@ -196,7 +196,7 @@ from typer.core import MarkupMode
 from typer.rich_utils import (
     MARKUP_MODE_MARKDOWN,
     STYLE_HELPTEXT_FIRST_LINE,
-    _make_rich_rext,
+    _make_rich_text,
 )
 
 
@@ -217,7 +217,7 @@ def _get_custom_help_text(
     # Remove single linebreaks
     if markup_mode != MARKUP_MODE_MARKDOWN and not first_line.startswith("\b"):
         first_line = first_line.replace("\n", " ")
-    yield _make_rich_rext(
+    yield _make_rich_text(
         text=first_line.strip(),
         style=STYLE_HELPTEXT_FIRST_LINE,
         markup_mode=markup_mode,
@@ -229,7 +229,7 @@ def _get_custom_help_text(
         remaining_lines = inspect.cleandoc(
             "\n\n".join(remaining_paragraphs).replace("<br/>", "\\")
         )
-        yield _make_rich_rext(
+        yield _make_rich_text(
             text=remaining_lines,
             style="cyan",
             markup_mode=markup_mode,
