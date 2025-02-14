@@ -22,7 +22,7 @@ dependencies = [
     "numpy",
     "scipy",
     "ase",
-    "sisl>=0.14.0",
+    "sisl[viz]>=0.14.0",
     "typer",
 ]
 
