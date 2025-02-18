@@ -198,13 +198,23 @@ class MatrixDataModule(pl.LightningDataModule):
         # Now check if we should take some data out of the training data to use it for
         # validation.
         if self.val_dataset is None and self.train_dataset is not None:
-            # Instantiate a random state to sample from data
-            rng = np.random.RandomState(32)
-            # User didn't specify a validation directory, just randomly draw 10 percent from the training.
-            perms = rng.permutation(len(self.train_dataset))
-            num_val = int(math.ceil(len(self.train_dataset) / 10))
-            val_indices = np.sort(perms[0:num_val]).tolist()
-            train_indices = np.sort(perms[num_val:]).tolist()
+            if len(self.train_dataset) == 1:
+                logging.warning(
+                    "There is only one training sample and no validation samples."
+                    " Unable to draw a validation set from the training data, therefore"
+                    " proceeding without validation dataset."
+                )
+
+                train_indices = np.array([0])
+                val_indices = np.array([])
+            else:
+                # Instantiate a random state to sample from data
+                rng = np.random.RandomState(32)
+                # User didn't specify a validation directory, just randomly draw 10 percent from the training.
+                perms = rng.permutation(len(self.train_dataset))
+                num_val = int(math.ceil(len(self.train_dataset) / 10))
+                val_indices = np.sort(perms[0:num_val]).tolist()
+                train_indices = np.sort(perms[num_val:]).tolist()
 
             self.val_dataset = torch.utils.data.Subset(self.train_dataset, val_indices)
             self.train_dataset = torch.utils.data.Subset(
@@ -216,6 +226,8 @@ class MatrixDataModule(pl.LightningDataModule):
             self.train_dataset = RotatingPoolData(
                 self.train_dataset, self.rotating_pool_size
             )
+
+        
 
     def train_dataloader(self):
         assert (
