@@ -117,7 +117,7 @@ docs = [
     "nbsphinx",
     "ipykernel",
     "e3nn",
-    "torch",
+    "torch<=2.5", # MACE pins e3nn to 0.4.4, which doesn't work with torch 2.6
     "mace_torch",
     "torch_geometric"
 ]
