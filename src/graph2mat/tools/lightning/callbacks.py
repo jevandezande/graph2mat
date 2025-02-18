@@ -427,10 +427,8 @@ class PlotMatrixError(Callback):
             # Convert flat error array to matrix format
             matrix = nodes_and_edges_to_sparse_orbital(
                 node_vals=ne,
-                node_ptr=self.node_labels_ptr,
                 edge_vals=ee,
                 edge_index=self.edge_index,
-                edge_ptr=self.edge_labels_ptr,
                 geometry=geometry,
                 sp_class=matrix_cls,
                 symmetrize_edges=trainer.datamodule.symmetric_matrix,

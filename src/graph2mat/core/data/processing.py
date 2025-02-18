@@ -745,8 +745,7 @@ class MatrixDataProcessor:
     def labels_to_csr(
         self,
         data: dict[str, np.ndarray],
-        coords_cartesian: bool = False,
-        threshold: float = 1e-8,
+        threshold: Optional[float] = None,
     ):
         # Get all the arrays that we need.
         node_labels = data["point_labels"]
@@ -758,16 +757,7 @@ class MatrixDataProcessor:
         edge_index = data["edge_index"]
         neigh_isc = data["neigh_isc"]
 
-        positions = data["positions"]
-
-        if not coords_cartesian:
-            # Positions need to be converted to cartesian coordinates
-            positions = self.basis_to_cartesian(positions)
-
         nsc = data["nsc"].squeeze()
-
-        # Get the values for the node blocks and the pointer to the start of each block.
-        node_labels_ptr = self.basis_table.point_block_pointer(point_types)
 
         # Add back atomic contributions to the node blocks in case they were removed
         if self.sub_point_matrix:
@@ -785,8 +775,6 @@ class MatrixDataProcessor:
             edge_types = edge_types[::2]
             neigh_isc = neigh_isc[::2]
 
-        edge_labels_ptr = self.basis_table.edge_block_pointer(edge_types)
-
         n_orbitals = [point.basis_size for point in self.basis_table.basis]
         orbitals = [n_orbitals[at_type] for at_type in point_types]
 
@@ -795,11 +783,9 @@ class MatrixDataProcessor:
         # Construct the matrix.
         matrix = nodes_and_edges_to_csr(
             node_vals=node_labels,
-            node_ptr=node_labels_ptr,
             edge_vals=edge_labels,
             edge_index=edge_index,
             edge_neigh_isc=neigh_isc,
-            edge_ptr=edge_labels_ptr,
             n_supercells=np.prod(nsc),
             orbitals=orbitals,
             symmetrize_edges=self.symmetric_matrix,
@@ -812,7 +798,7 @@ class MatrixDataProcessor:
         self,
         data: dict[str, np.ndarray],
         coords_cartesian: bool = False,
-        threshold: float = 1e-8,
+        threshold: Optional[float] = None,
     ) -> sisl.SparseOrbital:
         # Get all the arrays that we need.
         node_labels = data["point_labels"]
@@ -834,9 +820,6 @@ class MatrixDataProcessor:
 
         nsc = data["nsc"].squeeze()
 
-        # Get the values for the node blocks and the pointer to the start of each block.
-        node_labels_ptr = self.basis_table.point_block_pointer(point_types)
-
         # Add back atomic contributions to the node blocks in case they were removed
         if self.sub_point_matrix:
             assert self.basis_table.point_matrix is not None, "Point matrices"
@@ -853,8 +836,6 @@ class MatrixDataProcessor:
             edge_types = edge_types[::2]
             neigh_isc = neigh_isc[::2]
 
-        edge_labels_ptr = self.basis_table.edge_block_pointer(edge_types)
-
         unique_atoms = self.basis_table.get_sisl_atoms()
 
         geometry = sisl.Geometry(
@@ -867,11 +848,9 @@ class MatrixDataProcessor:
         # Construct the matrix.
         matrix = nodes_and_edges_to_sparse_orbital(
             node_vals=node_labels,
-            node_ptr=node_labels_ptr,
             edge_vals=edge_labels,
             edge_index=edge_index,
             edge_neigh_isc=neigh_isc,
-            edge_ptr=edge_labels_ptr,
             geometry=geometry,
             sp_class=self.matrix_cls,
             symmetrize_edges=self.symmetric_matrix,

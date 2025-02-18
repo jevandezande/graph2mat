@@ -113,17 +113,124 @@ def block_dict_to_csr(
         threshold=threshold,
     ).tocsr()
 
+def _blockmatrix_coo_coords(
+    orbitals: ArrayLike,
+    edge_index: ArrayLike,
+    n_supercells: int = 1,
+    edge_neigh_isc: Optional[ArrayLike] = None,
+    symmetrize_edges: bool = False,   
+):
+    """Returns the coo cordinates of a block matrix.
+
+    This function assumes that:
+
+        - All node blocks contain nonzero entries.
+        - Edge blocks for edges included in `edge_index` contain
+          nonzero entries.
+        - All individual blocks are dense. I.e. if a block "exists",
+          there are non-zero entries for all of its elements.
+    
+    The order of the coordinates returned by this function is:
+
+        1. Node blocks.
+        2. Edge blocks.
+        3. Edge blocks in reverse direction (if `symmetrize_edges == True`).
+    
+    Blocks (1) and (2) are assumed to be in row-major order. Blocks (3), if
+    any, are assumed to contain the data in the exact same order as (2).
+
+    Parameters
+    ----------
+    orbitals:
+        for each atom, the amount of orbitals it has.
+    edge_index:
+        shape (2, n_edges), for each edge the indices of the atoms
+        that participate. If `symmetrize_edges` is `True`, this must
+        ONLY contain the edges in one of the directions.
+    n_supercells:
+        number of supercells in the matrix.
+    edge_neigh_isc:
+        shape (n_edges, ), for each edge the index of the supercell
+        of the interaction. If not provided, all interactions are assumed
+        to be in the unit cell.
+    symmetrize_edges:
+        whether we should assume that the matrix contains also the edges
+        that are in the opposite direction as the ones provided in 
+        `edge_index`.
+    """
+    # Initialize the arrays to store the coordinates.
+    rows = []
+    cols = []
+
+    # Store index of first orbital for each atom, as well as total number of orbitals.
+    first_orb = np.cumsum([0, *orbitals])
+    no = first_orb[-1]
+
+    # First, compute the coordinates for the node blocks.
+    for i_at, dim in enumerate(orbitals):
+        i_start = first_orb[i_at]
+        i_end = i_start + dim
+
+        block_rows, block_cols = np.mgrid[i_start:i_end, i_start:i_end].reshape(2, -1)
+
+        rows.extend(block_rows)
+        cols.extend(block_cols)
+
+    # Then, the coordinates for the edge blocks.
+
+    # Initialize lists for symmetrized edges, which we store separately
+    # so that we can append all of them at the end.
+    rows_symm = []
+    cols_symm = []
+
+    # Assume unit cell interactions if edge_neigh_isc is not provided
+    if edge_neigh_isc is None:
+        edge_neigh_isc = itertools.repeat(0)
+    else:
+        edge_neigh_isc = np.array(edge_neigh_isc)
+
+    for i_edge, ((i_at, j_at), neigh_isc) in enumerate(
+        zip(edge_index.T, edge_neigh_isc)
+    ):
+        i_start = first_orb[i_at]
+        i_end = i_start + orbitals[i_at]
+        j_start = first_orb[j_at]
+        j_end = j_start + orbitals[j_at]
+
+        block_rows, block_cols = np.mgrid[i_start:i_end, j_start:j_end].reshape(2, -1)
+        sc_block_cols = block_cols + no * neigh_isc
+
+        rows.extend(block_rows)
+        cols.extend(sc_block_cols)
+
+        if symmetrize_edges:
+            # Columns and rows are easy to determine if the connection is in the unit
+            # cell, as the opposite block is in the transposed location.
+            opp_block_cols = block_rows
+            opp_block_rows = block_cols
+
+            if neigh_isc != 0:
+                # For supercell connections we need to find out what is the the supercell
+                # index of the neighbor in the opposite connection.
+                opp_block_cols += no * (n_supercells - neigh_isc)
+
+            rows_symm.extend(opp_block_rows)
+            cols_symm.extend(opp_block_cols)
+
+    # Add coordinates of symmetrized edges to the list of coordinates.
+    rows.extend(rows_symm)
+    cols.extend(cols_symm)
+
+    return np.array(rows), np.array(cols), (no, no*n_supercells)
 
 def nodes_and_edges_to_coo(
     node_vals: ArrayLike,
-    node_ptr: ArrayLike,
     edge_vals: ArrayLike,
     edge_index: ArrayLike,
-    edge_ptr: ArrayLike,
     orbitals: ArrayLike,
     n_supercells: int = 1,
     edge_neigh_isc: Optional[ArrayLike] = None,
-    threshold: float = 1e-8,
+    threshold: Optional[float] = None,
     symmetrize_edges: bool = False,
 ) -> coo_array:
     """Converts an orbital matrix from node and edges array to coo.
@@ -136,94 +243,41 @@ def nodes_and_edges_to_coo(
         whether for each edge only one direction is provided. The edge block for the
         opposite direction is then created as the transpose.
     """
-    data = []
-    rows = []
-    cols = []
 
-    first_orb = np.cumsum([0, *orbitals])
-    no = first_orb[-1]
+    rows, cols, shape = _blockmatrix_coo_coords(
+        orbitals=orbitals,
+        edge_index=edge_index,
+        n_supercells=n_supercells,
+        edge_neigh_isc=edge_neigh_isc,
+        symmetrize_edges=symmetrize_edges
+    )
 
-    # FIRST, FILL WITH DATA FROM NODES
-    # Make sure that we are using numpy arrays (not torch tensors)
-    node_vals = np.array(node_vals)
-
-    for i_at, start in enumerate(node_ptr[:-1]):
-        end = node_ptr[i_at + 1]
-        flat_block = node_vals[start:end]
-        mask = abs(flat_block) > threshold
-
-        data.extend(flat_block[mask])
-
-        dim = orbitals[i_at]
-
-        i_start = first_orb[i_at]
-        i_end = i_start + dim
-
-        block_rows, block_cols = np.mgrid[i_start:i_end, i_start:i_end].reshape(2, -1)
-
-        rows.extend(block_rows[mask])
-        cols.extend(block_cols[mask])
-
-    # THEN, FILL WITH DATA FROM EDGES
-    # Make sure that we are using numpy arrays (not torch tensors)
-    edge_vals = np.array(edge_vals)
-    edge_index = np.array(edge_index)
-
-    if edge_neigh_isc is None:
-        edge_neigh_isc = itertools.repeat(0)
+    if symmetrize_edges:
+        sparse_data = np.concatenate([node_vals, edge_vals, edge_vals])
     else:
-        edge_neigh_isc = np.array(edge_neigh_isc)
+        sparse_data = np.concatenate([node_vals, edge_vals])
 
-    for i_edge, ((i_at, j_at), neigh_isc) in enumerate(
-        zip(edge_index.T, edge_neigh_isc)
-    ):
-        start, end = edge_ptr[i_edge : i_edge + 2]
-        flat_block = edge_vals[start:end]
-        mask = abs(flat_block) > threshold
+    if threshold is not None:
+        mask = abs(sparse_data) > threshold
+    else:
+        # Remove NaNs
+        mask = sparse_data == sparse_data
+    
+    sparse_data = sparse_data[mask]
+    rows = rows[mask]
+    cols = cols[mask]
 
-        data.extend(flat_block[mask])
-
-        i_start = first_orb[i_at]
-        i_end = i_start + orbitals[i_at]
-        j_start = first_orb[j_at]
-        j_end = j_start + orbitals[j_at]
-
-        block_rows, block_cols = np.mgrid[i_start:i_end, j_start:j_end].reshape(2, -1)
-        sc_block_cols = block_cols + no * neigh_isc
-
-        rows.extend(block_rows[mask])
-        cols.extend(sc_block_cols[mask])
-
-        if symmetrize_edges:
-            # Add also the block for the opposite interaction
-            data.extend(flat_block[mask])
-
-            # Columns and rows are easy to determine if the connection is in the unit
-            # cell, as the opposite block is in the transposed location.
-            opp_block_cols = block_rows[mask]
-            opp_block_rows = block_cols[mask]
-
-            if neigh_isc != 0:
-                # For supercell connections we need to find out what is the the supercell
-                # index of the neighbor in the opposite connection.
-                opp_block_cols += no * (n_supercells - neigh_isc)
-
-            rows.extend(opp_block_rows)
-            cols.extend(opp_block_cols)
-
-    return coo_array((data, (rows, cols)), (no, no * n_supercells))
+    return coo_array((sparse_data, (rows, cols)), shape)
 
 
 def nodes_and_edges_to_csr(
     node_vals: ArrayLike,
-    node_ptr: ArrayLike,
     edge_vals: ArrayLike,
     edge_index: ArrayLike,
-    edge_ptr: ArrayLike,
     orbitals: ArrayLike,
     n_supercells: int = 1,
     edge_neigh_isc: Optional[ArrayLike] = None,
-    threshold: float = 1e-8,
+    threshold: Optional[float] = None,
     symmetrize_edges: bool = False,
 ) -> csr_array:
     """Converts an orbital matrix from node and edges array to csr.
@@ -232,11 +286,9 @@ def nodes_and_edges_to_csr(
     """
     return nodes_and_edges_to_coo(
         node_vals=node_vals,
-        node_ptr=node_ptr,
         edge_vals=edge_vals,
         edge_index=edge_index,
         edge_neigh_isc=edge_neigh_isc,
-        edge_ptr=edge_ptr,
         orbitals=orbitals,
         n_supercells=n_supercells,
         threshold=threshold,
@@ -255,10 +307,8 @@ def csr_to_sisl_sparse_orbital(
 
 def nodes_and_edges_to_sparse_orbital(
     node_vals: ArrayLike,
-    node_ptr: ArrayLike,
     edge_vals: ArrayLike,
     edge_index: ArrayLike,
-    edge_ptr: ArrayLike,
     geometry: sisl.Geometry,
     sp_class: Type[SparseOrbital] = SparseOrbital,
     edge_neigh_isc: Optional[ArrayLike] = None,
@@ -267,11 +317,9 @@ def nodes_and_edges_to_sparse_orbital(
 ) -> SparseOrbital:
     new_csr = nodes_and_edges_to_csr(
         node_vals=node_vals,
-        node_ptr=node_ptr,
         edge_vals=edge_vals,
         edge_index=edge_index,
         edge_neigh_isc=edge_neigh_isc,
-        edge_ptr=edge_ptr,
         orbitals=geometry.orbitals,
         n_supercells=geometry.n_s,
         threshold=threshold,

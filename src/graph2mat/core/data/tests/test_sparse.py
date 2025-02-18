@@ -74,8 +74,6 @@ def test_nodes_and_edges_to_csr(
 ):
     csr = density_matrix._csr
 
-    atom_labels_ptr = density_z_table.atom_block_pointer(density_data.point_types)
-    edge_labels_ptr = density_z_table.edge_block_pointer(density_data.edge_types)
     edge_index = density_data.edge_index
     neigh_isc = density_data.neigh_isc
     if symmetric:
@@ -84,10 +82,8 @@ def test_nodes_and_edges_to_csr(
 
     new_csr = nodes_and_edges_to_csr(
         density_data.point_labels,
-        atom_labels_ptr,
         density_data.edge_labels,
         edge_index,
-        edge_labels_ptr,
         edge_neigh_isc=neigh_isc,
         n_supercells=density_matrix.n_s,
         orbitals=density_config.atoms.orbitals,
@@ -101,8 +97,6 @@ def test_nodes_and_edges_to_csr(
 def test_nodes_and_edges_to_dm(
     density_matrix, density_config, density_data, density_z_table, symmetric
 ):
-    atom_labels_ptr = density_z_table.atom_block_pointer(density_data.point_types)
-    edge_labels_ptr = density_z_table.edge_block_pointer(density_data.edge_types)
     edge_index = density_data.edge_index
     neigh_isc = density_data.neigh_isc
     if symmetric:
@@ -111,10 +105,8 @@ def test_nodes_and_edges_to_dm(
 
     new_csr = nodes_and_edges_to_csr(
         density_data.point_labels,
-        atom_labels_ptr,
         density_data.edge_labels,
         edge_index,
-        edge_labels_ptr,
         edge_neigh_isc=neigh_isc,
         n_supercells=density_matrix.n_s,
         orbitals=density_config.atoms.orbitals,
@@ -134,8 +126,6 @@ def test_nodes_and_edges_to_dm(
 def test_nodes_and_edges_to_dm_direct(
     density_matrix, density_data, density_z_table, symmetric
 ):
-    atom_labels_ptr = density_z_table.atom_block_pointer(density_data.point_types)
-    edge_labels_ptr = density_z_table.edge_block_pointer(density_data.edge_types)
     edge_index = density_data.edge_index
     neigh_isc = density_data.neigh_isc
     if symmetric:
@@ -144,10 +134,8 @@ def test_nodes_and_edges_to_dm_direct(
 
     new_dm = nodes_and_edges_to_sparse_orbital(
         density_data.point_labels,
-        atom_labels_ptr,
         density_data.edge_labels,
         edge_index,
-        edge_labels_ptr,
         edge_neigh_isc=neigh_isc,
         geometry=density_matrix.geometry,
         sp_class=sisl.DensityMatrix,
