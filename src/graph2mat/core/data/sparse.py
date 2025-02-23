@@ -49,7 +49,7 @@ def csr_to_block_dict(
         cols=spmat.col,
         atom_first_orb=atoms.firsto,
         orbitals=orbitals,
-        n_atoms=len(atoms.specie),
+        n_atoms=len(atoms.species),
     )
 
     orbitals = geometry_atoms.orbitals if geometry_atoms is not None else atoms.orbitals
@@ -113,12 +113,13 @@ def block_dict_to_csr(
         threshold=threshold,
     ).tocsr()
 
+
 def _blockmatrix_coo_coords(
     orbitals: ArrayLike,
     edge_index: ArrayLike,
     n_supercells: int = 1,
     edge_neigh_isc: Optional[ArrayLike] = None,
-    symmetrize_edges: bool = False,   
+    symmetrize_edges: bool = False,
 ):
     """Returns the coo cordinates of a block matrix.
 
@@ -129,13 +130,13 @@ def _blockmatrix_coo_coords(
           nonzero entries.
         - All individual blocks are dense. I.e. if a block "exists",
           there are non-zero entries for all of its elements.
-    
+
     The order of the coordinates returned by this function is:
 
         1. Node blocks.
         2. Edge blocks.
         3. Edge blocks in reverse direction (if `symmetrize_edges == True`).
-    
+
     Blocks (1) and (2) are assumed to be in row-major order. Blocks (3), if
     any, are assumed to contain the data in the exact same order as (2).
 
@@ -155,7 +156,7 @@ def _blockmatrix_coo_coords(
         to be in the unit cell.
     symmetrize_edges:
         whether we should assume that the matrix contains also the edges
-        that are in the opposite direction as the ones provided in 
+        that are in the opposite direction as the ones provided in
         `edge_index`.
     """
     # Initialize the arrays to store the coordinates.
@@ -221,7 +222,8 @@ def _blockmatrix_coo_coords(
     rows.extend(rows_symm)
     cols.extend(cols_symm)
 
-    return np.array(rows), np.array(cols), (no, no*n_supercells)
+    return np.array(rows), np.array(cols), (no, no * n_supercells)
+
 
 def nodes_and_edges_to_coo(
     node_vals: ArrayLike,
@@ -249,7 +251,7 @@ def nodes_and_edges_to_coo(
         edge_index=edge_index,
         n_supercells=n_supercells,
         edge_neigh_isc=edge_neigh_isc,
-        symmetrize_edges=symmetrize_edges
+        symmetrize_edges=symmetrize_edges,
     )
 
     if symmetrize_edges:
@@ -262,7 +264,7 @@ def nodes_and_edges_to_coo(
     else:
         # Remove NaNs
         mask = sparse_data == sparse_data
-    
+
     sparse_data = sparse_data[mask]
     rows = rows[mask]
     cols = cols[mask]
