@@ -48,9 +48,14 @@ class LitBasisMatrixModel(pl.LightningModule):
                 )
         else:
             self.basis_table = basis_table
-        
-        self.initial_node_feats = [NodeFeature.registry[k] for k in initial_node_feats.split(" ")]
-        self.initial_node_feats_irreps = sum([f.get_e3nn_irreps(self.basis_table) for f in self.initial_node_feats], o3.Irreps()).simplify()
+
+        self.initial_node_feats = [
+            NodeFeature.registry[k] for k in initial_node_feats.split(" ")
+        ]
+        self.initial_node_feats_irreps = sum(
+            [f.get_e3nn_irreps(self.basis_table) for f in self.initial_node_feats],
+            o3.Irreps(),
+        ).simplify()
 
         self.loss_fn = loss()
 
@@ -140,11 +145,6 @@ class LitBasisMatrixModel(pl.LightningModule):
         "Objects to include in checkpoint file"
         checkpoint["basis_table"] = self.basis_table
         checkpoint["version"] = __version__
-
-        # Store the model class and the kwargs used to initialize it. This is
-        # useful so that the model can be loaded independently, without having
-        # to use pytorch lightning.
-        checkpoint["model_kwargs"] = self.model_kwargs
 
     def on_load_checkpoint(self, checkpoint) -> None:
         "Objects to retrieve from checkpoint file"
