@@ -113,7 +113,7 @@ class MatrixMACE(torch.nn.Module):
                 node_labels_list.append(node_labels)
                 edge_labels_list.append(edge_labels)
 
-            node_labels = torch.stack(node_labels_list).sum(axis=0)
-            edge_labels = torch.stack(edge_labels_list).sum(axis=0)
+            node_labels = torch.stack(node_labels_list).mean(axis=0)
+            edge_labels = torch.stack(edge_labels_list).mean(axis=0)
 
         return {**mace_out, "node_labels": node_labels, "edge_labels": edge_labels}
