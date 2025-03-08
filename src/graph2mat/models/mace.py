@@ -4,7 +4,9 @@ from copy import copy
 
 from mace.modules import MACE
 
+from graph2mat import Graph2Mat
 from graph2mat.bindings.e3nn import E3nnGraph2Mat
+from graph2mat.bindings.torch.data import TorchBasisMatrixData
 
 import torch
 from e3nn import o3
@@ -17,9 +19,31 @@ from mace.modules.utils import (
 
 
 class MatrixMACE(torch.nn.Module):
-    """Model that wraps a MACE model to produce a matrix output."""
+    """Model that wraps a MACE model to produce a matrix output.
 
-    def __init__(self, mace: MACE, readout_per_interaction: bool = False, **kwargs):
+    Parameters
+    ----------
+    mace :
+        MACE model to wrap.
+    readout_per_interaction :
+        If ``True``, a separate readout is applied to the features of each
+        message passing interaction.
+        If ``False``, the features of all interactions are concatenated
+        and passed to a single readout.
+    graph2mat_cls :
+        Class of the graph2mat model to use for the readouts.
+    **kwargs :
+        Additional keyword arguments to pass to ``graph2mat_cls`` for
+        initialization.
+    """
+
+    def __init__(
+        self,
+        mace: MACE,
+        readout_per_interaction: bool = False,
+        graph2mat_cls: type[Graph2Mat] = E3nnGraph2Mat,
+        **kwargs,
+    ):
         super().__init__()
 
         self.mace = mace
@@ -35,7 +59,7 @@ class MatrixMACE(torch.nn.Module):
 
             self.matrix_readouts = torch.nn.ModuleList(
                 [
-                    E3nnGraph2Mat(
+                    graph2mat_cls(
                         irreps=dict(
                             node_attrs_irreps=inter.node_attrs_irreps,
                             node_feats_irreps=o3.Irreps(inter.hidden_irreps),
@@ -53,7 +77,7 @@ class MatrixMACE(torch.nn.Module):
                 [inter.hidden_irreps for inter in self.mace.interactions], o3.Irreps()
             )
 
-            self.matrix_readouts = E3nnGraph2Mat(
+            self.matrix_readouts = graph2mat_cls(
                 irreps=dict(
                     node_attrs_irreps=self.mace.interactions[0].node_attrs_irreps,
                     node_feats_irreps=self.mace_inter_irreps,
@@ -64,7 +88,27 @@ class MatrixMACE(torch.nn.Module):
                 **kwargs,
             )
 
-    def forward(self, data, compute_force=False, **kwargs):
+    def forward(
+        self, data: TorchBasisMatrixData, compute_force: bool = False, **kwargs
+    ) -> dict[str, torch.Tensor]:
+        """Forward pass of the model.
+
+        Parameters
+        ----------
+        data :
+            Input data.
+        compute_force :
+            Passed directly to the ``compute_force`` argument of the MACE model.
+        **kwargs :
+            Additional keyword arguments to pass to the MACE
+            model for the forward pass.
+
+        Returns
+        -------
+        output :
+            The output of the MACE model, with the additional keys "node_labels"
+            and "edge_labels" containing the output of ``Graph2Mat``.
+        """
         mace_out = self.mace(data, compute_force=compute_force, **kwargs)
 
         # Compute edge feats and edge attrs from the modules in the mace model
