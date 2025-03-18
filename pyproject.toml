@@ -2,7 +2,7 @@
 requires-python = ">=3.9"
 
 name = "graph2mat"
-version = "0.0.6"
+version = "0.0.7"
 description = "Utility package to work with equivariant matrices and graphs."
 readme = "README.md"
 license = {text = "MIT"}
@@ -22,7 +22,7 @@ dependencies = [
     "numpy",
     "scipy",
     "ase",
-    "sisl[viz]>=0.14.0",
+    "sisl[viz]>=0.15.0",
     "typer",
 ]
 
