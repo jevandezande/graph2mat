@@ -66,7 +66,6 @@ extensions = [
 ]
 napoleon_numpy_docstring = True
 napoleon_use_param = True
-napoleon_custom_sections = ["Haha"]
 
 # There currently is a bug with mathjax >= 3, so we resort to 2.7.7
 # mathjax_path = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/latest.js?config=TeX-AMS-MML_HTMLorMML"
