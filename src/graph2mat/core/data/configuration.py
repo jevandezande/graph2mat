@@ -25,6 +25,7 @@ from scipy.sparse import issparse, csr_array
 from .basis import PointBasis, NoBasisAtom
 from .matrices import OrbitalMatrix, BasisMatrix, get_matrix_cls
 from .sparse import csr_to_block_dict
+from .formats import Formats, conversions
 
 Vector = np.ndarray  # [3,]
 Positions = np.ndarray  # [..., 3]
@@ -140,14 +141,9 @@ class BasisConfiguration:
 
     def to_sisl_geometry(self) -> sisl.Geometry:
         """Converts the configuration to a sisl Geometry."""
-
-        atoms = {pb.type: pb.to_sisl_atom(Z=i + 1) for i, pb in enumerate(self.basis)}
-
-        return sisl.Geometry(
-            xyz=self.positions,
-            atoms=[atoms[k] for k in self.point_types],
-            lattice=self.cell,
-        )
+        return conversions.get_converter(
+            Formats.BASISCONFIGURATION, Formats.SISL_GEOMETRY
+        )(self)
 
 
 @dataclass
@@ -294,17 +290,10 @@ class OrbitalConfiguration(BasisConfiguration):
         **kwargs:
             Additional arguments to be passed to the OrbitalConfiguration constructor.
         """
-
-        if "pbc" not in kwargs:
-            kwargs["pbc"] = (True, True, True)
-
-        return cls(
-            point_types=geometry.atoms.Z,
-            basis=geometry.atoms,
-            positions=geometry.xyz,
-            cell=geometry.cell,
-            **kwargs,
+        converter = conversions.get_converter(
+            Formats.SISL_GEOMETRY, Formats.ORBITALCONFIGURATION
         )
+        return converter(geometry, cls=cls, **kwargs)
 
     @classmethod
     def from_matrix(
@@ -330,25 +319,10 @@ class OrbitalConfiguration(BasisConfiguration):
         **kwargs:
             Additional arguments to be passed to the OrbitalConfiguration constructor.
         """
-        if geometry is None:
-            # The matrix will have an associated geometry, so we will use it.
-            geometry = matrix.geometry
-
-        if labels:
-            # Determine the dataclass that should store the matrix and build the block dict
-            # sparse structure.
-            matrix_cls = get_matrix_cls(matrix.__class__)
-            matrix_block = csr_to_block_dict(
-                matrix._csr,
-                matrix.atoms,
-                nsc=matrix.nsc,
-                matrix_cls=matrix_cls,
-                geometry_atoms=geometry.atoms,
-            )
-
-            kwargs["matrix"] = matrix_block
-
-        return cls.from_geometry(geometry=geometry, **kwargs)
+        converter = conversions.get_converter(
+            Formats.SISL, Formats.ORBITALCONFIGURATION
+        )
+        return converter(matrix, geometry=geometry, labels=labels, cls=cls, **kwargs)
 
     @classmethod
     def from_run(
@@ -362,111 +336,267 @@ class OrbitalConfiguration(BasisConfiguration):
 
         Parameters
         -----------
-        runfilepath: str or Path
+        runfilepath:
             The path of the main input file. E.g. in SIESTA this is the path to the ".fdf" file
-        out_matrix: {"density_matrix", "hamiltonian", "energy_density_matrix", "dynamical_matrix", None}
+        geometry_path:
+            The path to the geometry file. If None, the geometry will be read from the run file.
+        out_matrix:
             The matrix to be read from the output of the run. The configuration object will
             contain the matrix.
             If it is None, then no matrices are read from the output. This is the case when trying to
             predict matrices, since you don't have the output yet.
+        cls:
+            Class to initialize, should be a subclass of ``OrbitalConfiguration``.
+        basis:
+            The basis to use for the configuration. If None, the basis of the read geometry
+            will be used.
         """
-        # Initialize the file object for the main input file
-        main_input = sisl.get_sile(runfilepath)
-        # Build some metadata so that the OrbitalConfiguration object can be traced back to the run.
-        metadata = {"path": runfilepath}
+        converter = conversions.get_converter(
+            Formats.SISL_SILE, Formats.ORBITALCONFIGURATION
+        )
+        return converter(
+            runfilepath,
+            geometry_path=geometry_path,
+            out_matrix=out_matrix,
+            basis=basis,
+            cls=cls,
+        )
 
-        def _change_geometry_basis(geometry, basis):
-            # new_atoms = geometry.atoms.copy()
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                for atom in [*geometry.atoms.atom]:
-                    for basis_at in basis:
-                        if atom.tag == basis_at.tag:
-                            geometry.atoms[atom.tag] = basis_at
-                            break
-                    else:
-                        raise ValueError(
-                            f"Atom '{atom.tag}' not found in the provided basis"
-                        )
 
-        def _read_geometry(main_input, basis):
-            # Read the geometry from the main input file
-            try:
-                geometry = main_input.read_geometry(output=True)
-            except TypeError:
-                geometry = main_input.read_geometry()
+# ---------------------------------------
+#    Add to the formats register
+# ---------------------------------------
+# Register the classes as aliases for the formats
+Formats.add_alias(Formats.BASISCONFIGURATION, BasisConfiguration)
+Formats.add_alias(Formats.ORBITALCONFIGURATION, OrbitalConfiguration)
 
-            if basis is not None:
-                _change_geometry_basis(geometry, basis)
+# Conversions from/to BasisConfiguration classes
+converter = conversions.converter
 
-            return geometry
 
-        def _copy_basis(
-            original: sisl.Geometry, geometry: sisl.Geometry, notfound_ok=False
-        ) -> sisl.Geometry:
-            import warnings
+@converter
+def _configuration_to_geometry(config: BasisConfiguration) -> sisl.Geometry:
+    atoms = {pb.type: pb.to_sisl_atom(Z=i + 1) for i, pb in enumerate(config.basis)}
 
-            new_geometry = geometry.copy()
+    return sisl.Geometry(
+        xyz=config.positions,
+        atoms=[atoms[k] for k in config.point_types],
+        lattice=config.cell,
+    )
 
-            for atom in geometry.atoms.atom:
-                for basis_atom in original.atoms:
-                    if basis_atom.tag == atom.tag:
+
+@converter(Formats.SISL_GEOMETRY, Formats.ORBITALCONFIGURATION)
+def _geometry_to_configuration(
+    geometry: sisl.Geometry,
+    cls: type[OrbitalConfiguration] = OrbitalConfiguration,
+    **kwargs,
+) -> OrbitalConfiguration:
+    """Initializes an ``OrbitalConfiguration`` object from a sisl geometry.
+
+    Note that the created object will not have an associated matrix, unless it is passed
+    explicitly as a keyword argument.
+
+    Parameters
+    ----------
+    geometry:
+        The geometry to associate to the OrbitalConfiguration.
+    cls:
+        Class to initialize, should be a subclass of ``OrbitalConfiguration``.
+    **kwargs:
+        Additional arguments to be passed to the OrbitalConfiguration constructor.
+    """
+
+    if "pbc" not in kwargs:
+        kwargs["pbc"] = (True, True, True)
+
+    return cls(
+        point_types=geometry.atoms.Z,
+        basis=geometry.atoms,
+        positions=geometry.xyz,
+        cell=geometry.cell,
+        **kwargs,
+    )
+
+
+@converter(Formats.SISL, Formats.ORBITALCONFIGURATION)
+def _sisl_to_orbital_configuration(
+    matrix: sisl.SparseOrbital,
+    geometry: Union[sisl.Geometry, None] = None,
+    labels: bool = True,
+    cls: type[OrbitalConfiguration] = OrbitalConfiguration,
+    **kwargs,
+) -> OrbitalConfiguration:
+    """Initializes an OrbitalConfiguration object from a sisl matrix.
+
+    Parameters
+    ----------
+    matrix
+        The matrix to associate to the OrbitalConfiguration. This matrix should have an associated
+        geometry, which will be used.
+    geometry
+        The geometry to associate to the OrbitalConfiguration. If None, the geometry of the matrix
+        will be used.
+    labels
+        Whether to process the labels from the matrix. If False, the only thing to read
+        will be the atomic structure, which is likely the input of your model.
+    cls
+        Class to initialize, should be a subclass of ``OrbitalConfiguration``.
+    **kwargs
+        Additional arguments to be passed to the OrbitalConfiguration constructor.
+    """
+    if geometry is None:
+        # The matrix will have an associated geometry, so we will use it.
+        geometry = matrix.geometry
+
+    if labels:
+        # Determine the dataclass that should store the matrix and build the block dict
+        # sparse structure.
+        matrix_cls = get_matrix_cls(matrix.__class__)
+        matrix_block = csr_to_block_dict(
+            matrix._csr,
+            matrix.atoms,
+            nsc=matrix.nsc,
+            matrix_cls=matrix_cls,
+            geometry_atoms=geometry.atoms,
+        )
+
+        kwargs["matrix"] = matrix_block
+
+    from_geometry = conversions.get_converter(
+        Formats.SISL_GEOMETRY, Formats.ORBITALCONFIGURATION
+    )
+
+    return from_geometry(geometry=geometry, cls=cls, **kwargs)
+
+
+@converter(Formats.SISL_SILE, Formats.ORBITALCONFIGURATION)
+def _sisl_run_to_orbitalconfiguration(
+    runfilepath: Union[str, Path],
+    geometry_path: Optional[Union[str, Path]] = None,
+    out_matrix: Optional[PhysicsMatrixType] = None,
+    cls: type[OrbitalConfiguration] = OrbitalConfiguration,
+    basis: Optional[sisl.Atoms] = None,
+) -> OrbitalConfiguration:
+    """Initializes an OrbitalConfiguration object from the main input file of a run.
+
+    Parameters
+    ----------
+    runfilepath:
+        The path of the main input file. E.g. in SIESTA this is the path to the ".fdf" file
+    geometry_path:
+        The path to the geometry file. If None, the geometry will be read from the run file.
+    out_matrix:
+        The matrix to be read from the output of the run. The configuration object will
+        contain the matrix.
+        If it is None, then no matrices are read from the output. This is the case when trying to
+        predict matrices, since you don't have the output yet.
+    cls:
+        Class to initialize, should be a subclass of ``OrbitalConfiguration``.
+    basis:
+        The basis to use for the configuration. If None, the basis of the read geometry
+        will be used.
+    """
+    # Initialize the file object for the main input file
+    main_input = sisl.get_sile(runfilepath)
+    # Build some metadata so that the OrbitalConfiguration object can be traced back to the run.
+    metadata = {"path": runfilepath}
+
+    def _change_geometry_basis(geometry, basis):
+        # new_atoms = geometry.atoms.copy()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            for atom in [*geometry.atoms.atom]:
+                for basis_at in basis:
+                    if atom.tag == basis_at.tag:
+                        geometry.atoms[atom.tag] = basis_at
                         break
                 else:
-                    if not notfound_ok:
-                        raise ValueError(f"Couldn't find atom {atom} in the basis")
-                    basis_atom = NoBasisAtom(atom.Z, tag=atom.tag)
+                    raise ValueError(
+                        f"Atom '{atom.tag}' not found in the provided basis"
+                    )
 
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    new_geometry.atoms.replace_atom(atom, basis_atom)
+    def _read_geometry(main_input, basis):
+        # Read the geometry from the main input file
+        try:
+            geometry = main_input.read_geometry(output=True)
+        except TypeError:
+            geometry = main_input.read_geometry()
 
-            return new_geometry
+        if basis is not None:
+            _change_geometry_basis(geometry, basis)
 
-        if isinstance(main_input, sisl.io.fdfSileSiesta):
-            type_of_run = main_input.get("MD.TypeOfRun")
-            if type_of_run == "qmmm":
-                pipe_file = main_input.get("QMMM.Driver.QMRegionFile")
-                # geometry_path = main_input.file.parent / (pipe_file.split(".")[0] + ".last.pdb")
-                geometry_path = main_input.file.parent / (
-                    pipe_file.split(".")[0] + ".XV"
-                )
+        return geometry
 
-        if out_matrix is not None:
-            # Get the method to read the desired matrix and read it
-            read = getattr(main_input, f"read_{out_matrix}")
-            if basis is not None:
-                geometry = _read_geometry(main_input, basis)
-                matrix = read(geometry=geometry)
+    def _copy_basis(
+        original: sisl.Geometry, geometry: sisl.Geometry, notfound_ok=False
+    ) -> sisl.Geometry:
+        import warnings
+
+        new_geometry = geometry.copy()
+
+        for atom in geometry.atoms.atom:
+            for basis_atom in original.atoms:
+                if basis_atom.tag == atom.tag:
+                    break
             else:
-                matrix = read()
+                if not notfound_ok:
+                    raise ValueError(f"Couldn't find atom {atom} in the basis")
+                basis_atom = NoBasisAtom(atom.Z, tag=atom.tag)
 
-            kwargs = {}
-            if geometry_path is not None:
-                # If we have a geometry path, we will read the geometry from there.
-                # from ase.io import read
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                new_geometry.atoms.replace_atom(atom, basis_atom)
 
-                kwargs["geometry"] = sisl.Geometry.read(geometry_path)
-                kwargs["geometry"] = _copy_basis(
-                    matrix.geometry, kwargs["geometry"], notfound_ok=True
-                )
+        return new_geometry
 
-            metadata["geometry"] = kwargs.get("geometry", matrix.geometry)
+    if isinstance(main_input, sisl.io.fdfSileSiesta):
+        type_of_run = main_input.get("MD.TypeOfRun")
+        if type_of_run == "qmmm":
+            pipe_file = main_input.get("QMMM.Driver.QMRegionFile")
+            # geometry_path = main_input.file.parent / (pipe_file.split(".")[0] + ".last.pdb")
+            geometry_path = main_input.file.parent / (pipe_file.split(".")[0] + ".XV")
 
-            # Now build the OrbitalConfiguration object using this matrix.
-            return cls.from_matrix(matrix=matrix, metadata=metadata, **kwargs)
-        else:
-            # We have no matrix to read, we will just read the geometry.
+    if out_matrix is not None:
+        # Get the method to read the desired matrix and read it
+        read = getattr(main_input, f"read_{out_matrix}")
+        if basis is not None:
             geometry = _read_geometry(main_input, basis)
+            matrix = read(geometry=geometry)
+        else:
+            matrix = read()
 
-            if geometry_path is not None:
-                # If we have a geometry path, we will read the geometry from there.
-                from ase.io import read
+        kwargs = {}
+        if geometry_path is not None:
+            # If we have a geometry path, we will read the geometry from there.
+            # from ase.io import read
 
-                new_geometry = sisl.Geometry.new(read(geometry_path))
-                geometry = _copy_basis(geometry, new_geometry, notfound_ok=True)
+            kwargs["geometry"] = sisl.Geometry.read(geometry_path)
+            kwargs["geometry"] = _copy_basis(
+                matrix.geometry, kwargs["geometry"], notfound_ok=True
+            )
 
-            metadata["geometry"] = geometry
+        metadata["geometry"] = kwargs.get("geometry", matrix.geometry)
 
-            # And build the OrbitalConfiguration object using this geometry.
-            return cls.from_geometry(geometry=geometry, metadata=metadata)
+        # Now build the OrbitalConfiguration object using this matrix.
+        from_matrix = conversions.get_converter(
+            Formats.SISL, Formats.ORBITALCONFIGURATION
+        )
+        return from_matrix(matrix=matrix, metadata=metadata, cls=cls, **kwargs)
+    else:
+        # We have no matrix to read, we will just read the geometry.
+        geometry = _read_geometry(main_input, basis)
+
+        if geometry_path is not None:
+            # If we have a geometry path, we will read the geometry from there.
+            from ase.io import read
+
+            new_geometry = sisl.Geometry.new(read(geometry_path))
+            geometry = _copy_basis(geometry, new_geometry, notfound_ok=True)
+
+        metadata["geometry"] = geometry
+
+        # And build the OrbitalConfiguration object using this geometry.
+        from_geometry = conversions.get_converter(
+            Formats.SISL_GEOMETRY, Formats.ORBITALCONFIGURATION
+        )
+        return from_geometry(geometry=geometry, metadata=metadata, cls=cls)

@@ -2,16 +2,20 @@
 import sisl
 import numpy as np
 
-from graph2mat.core.data.sparse import (
-    csr_to_block_dict,
-    block_dict_to_csr,
-    nodes_and_edges_to_csr,
-    csr_to_sisl_sparse_orbital,
-    nodes_and_edges_to_sparse_orbital,
+from graph2mat import conversions, Formats
+
+csr_to_basismatrix = conversions.get_converter(Formats.SCIPY_CSR, Formats.BASISMATRIX)
+block_dict_to_csr = conversions.get_converter(Formats.BLOCK_DICT, Formats.SCIPY_CSR)
+nodes_and_edges_to_csr = conversions.get_converter(
+    Formats.NODESEDGES, Formats.SCIPY_CSR
+)
+csr_to_sisl_sparse_orbital = conversions.get_converter(Formats.SCIPY_CSR, Formats.SISL)
+nodes_and_edges_to_sparse_orbital = conversions.get_converter(
+    Formats.NODESEDGES, Formats.SISL
 )
 
 
-def test_csr_to_block_dict_simple(density_matrix):
+def test_csr_to_basismatrix_simple(density_matrix):
     density_matrix = density_matrix.copy()
 
     density_matrix._csr.data[:] = 0
@@ -19,13 +23,13 @@ def test_csr_to_block_dict_simple(density_matrix):
     density_matrix[0, density_matrix.orbitals[0]] = 2
     density_matrix[density_matrix.orbitals[0], 0] = 3
 
-    block_dict = csr_to_block_dict(
+    basis_matrix = csr_to_basismatrix(
         density_matrix._csr, density_matrix.atoms, nsc=density_matrix.nsc
     )
 
     for (i_at, j_at), val in zip([(0, 0), (0, 1), (1, 0)], [1, 2, 3]):
-        assert block_dict.block_dict[i_at, j_at, 0][0, 0] == val
-        assert (~np.isnan(block_dict.block_dict[i_at, j_at, 0])).sum() == 1
+        assert basis_matrix.block_dict[i_at, j_at, 0][0, 0] == val
+        assert (~np.isnan(basis_matrix.block_dict[i_at, j_at, 0])).sum() == 1
 
 
 def test_block_dict_to_csr_simple(density_matrix):
@@ -38,16 +42,16 @@ def test_block_dict_to_csr_simple(density_matrix):
     density_matrix[0, first_orb_atom1] = 2
     density_matrix[first_orb_atom1, 0] = 3
 
-    block_dict = csr_to_block_dict(
+    basis_matrix = csr_to_basismatrix(
         density_matrix._csr, density_matrix.atoms, nsc=density_matrix.nsc
     )
 
     for (i_at, j_at), val in zip([(0, 0), (0, 1), (1, 0)], [1, 2, 3]):
-        assert block_dict.block_dict[i_at, j_at, 0][0, 0] == val
-        assert (~np.isnan(block_dict.block_dict[i_at, j_at, 0])).sum() == 1
+        assert basis_matrix.block_dict[i_at, j_at, 0][0, 0] == val
+        assert (~np.isnan(basis_matrix.block_dict[i_at, j_at, 0])).sum() == 1
 
     new_csr = block_dict_to_csr(
-        block_dict.block_dict, density_matrix.firsto, n_supercells=density_matrix.n_s
+        basis_matrix.block_dict, density_matrix.firsto, n_supercells=density_matrix.n_s
     )
 
     assert (new_csr.data != 0).sum() == 3
@@ -59,10 +63,10 @@ def test_block_dict_to_csr_simple(density_matrix):
 
 def test_full_block_dict_csr(density_matrix):
     csr = density_matrix._csr
-    block_dict = csr_to_block_dict(csr, density_matrix.atoms, nsc=density_matrix.nsc)
+    basis_matrix = csr_to_basismatrix(csr, density_matrix.atoms, nsc=density_matrix.nsc)
 
     new_csr = block_dict_to_csr(
-        block_dict.block_dict, density_matrix.firsto, n_supercells=density_matrix.n_s
+        basis_matrix.block_dict, density_matrix.firsto, n_supercells=density_matrix.n_s
     )
 
     assert csr.shape[:-1] == new_csr.shape

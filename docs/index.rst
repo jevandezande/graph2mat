@@ -69,4 +69,5 @@ powerful applications that take full advantage of the properties of these matric
    :hidden:
 
    api/description
+   api/conversions
    api/full_api

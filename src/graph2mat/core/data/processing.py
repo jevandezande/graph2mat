@@ -31,6 +31,9 @@ from typing import (
     Sequence,
     Generator,
     List,
+    Generic,
+    TypeVar,
+    Iterable,
 )
 from functools import cached_property
 from pathlib import Path
@@ -51,10 +54,9 @@ except ImportError:
         pass
 
 
-from .basis import get_change_of_basis
 from .neighborhood import get_neighborhood
 from .configuration import BasisConfiguration, OrbitalConfiguration, PhysicsMatrixType
-from .sparse import nodes_and_edges_to_sparse_orbital, nodes_and_edges_to_csr
+from .formats import conversions, Formats
 from .table import BasisTableWithEdges
 from .node_feats import OneHotZ
 
@@ -106,13 +108,12 @@ class MatrixDataProcessor:
         return dataclasses.replace(self, **kwargs)
 
     @cached_property
-    def matrix_cls(self):
+    def default_out_format(self):
         return {
-            "density_matrix": sisl.DensityMatrix,
-            "energy_density_matrix": sisl.EnergyDensityMatrix,
-            "hamiltonian": sisl.Hamiltonian,
-            None: None,
-        }[self.out_matrix]
+            "density_matrix": Formats.SISL_DM,
+            "energy_density_matrix": Formats.SISL_EDM,
+            "hamiltonian": Formats.SISL_H,
+        }.get(self.out_matrix, self.out_matrix or Formats.SCIPY_CSR)
 
     def get_config_kwargs(self, obj: Any) -> Dict[str, Any]:
         if isinstance(obj, (str, Path)):
@@ -125,7 +126,6 @@ class MatrixDataProcessor:
 
     def torch_predict(self, torch_model, geometry: sisl.Geometry):
         import torch
-        from torch_geometric.loader import DataLoader
 
         from graph2mat.bindings.torch import TorchBasisMatrixData
 
@@ -151,8 +151,9 @@ class MatrixDataProcessor:
         self,
         data: BasisMatrixData,
         predictions: Optional[Dict] = None,
-        threshold: float = 1e-8,
+        threshold: Optional[float] = None,
         is_batch: Optional[bool] = None,
+        out_format: Optional[str] = None,
     ):
         """Converts a BasisMatrixData object into a matrix.
 
@@ -178,6 +179,9 @@ class MatrixDataProcessor:
 
             If None, it will be considered a batch if it is an instance of
             `torch_geometric`'s `Batch`.
+        out_format:
+            Format to output the matrix. If None, the default format of the data
+            processor is used.
 
         Returns
         ---------
@@ -185,14 +189,20 @@ class MatrixDataProcessor:
 
         See Also
         ---------
-        yield_from_batch: The more explicit option for batches, which returns a generator.
+        yield_from_batch
+            The more explicit option for batches, which returns a generator.
+        graph2mat.Formats
+            Class containing all the available formats which can be passed to
+            the ``out_format`` argument.
         """
 
         if is_batch is None:
             is_batch = isinstance(data, Batch)
         if is_batch:
             return tuple(
-                self.yield_from_batch(data, predictions, threshold, as_matrix=True)
+                self.yield_from_batch(
+                    data, predictions, threshold, as_matrix=True, out_format=out_format
+                )
             )
 
         if predictions is not None:
@@ -200,10 +210,10 @@ class MatrixDataProcessor:
             data.point_labels = predictions["node_labels"]
             data.edge_labels = predictions["edge_labels"]
 
-        if self.matrix_cls is None:
-            return data.to_csr(threshold=threshold)
-        else:
-            return data.to_sparse_orbital_matrix(threshold=threshold)
+        if out_format is None:
+            out_format = self.default_out_format
+
+        return data.convert_to(out_format, threshold=threshold)
 
     def yield_from_batch(
         self,
@@ -211,6 +221,7 @@ class MatrixDataProcessor:
         predictions: Optional[Dict] = None,
         threshold: float = 1e-8,
         as_matrix: bool = False,
+        out_format: Optional[str] = None,
     ) -> Generator:
         """Yields matrices from a batch.
 
@@ -241,7 +252,9 @@ class MatrixDataProcessor:
             for i in range(data.num_graphs):
                 example = data.get_example(i)
                 if as_matrix:
-                    yield self.matrix_from_data(example, threshold=threshold)
+                    yield self.matrix_from_data(
+                        example, threshold=threshold, out_format=out_format
+                    )
                 else:
                     yield example
         else:
@@ -294,7 +307,9 @@ class MatrixDataProcessor:
                 example.edge_labels = new_edge_label
 
                 if as_matrix:
-                    yield self.matrix_from_data(example, threshold=threshold)
+                    yield self.matrix_from_data(
+                        example, threshold=threshold, out_format=out_format
+                    )
                 else:
                     yield example
 
@@ -742,64 +757,19 @@ class MatrixDataProcessor:
 
         return np.eye(num_classes)[point_types]
 
-    def labels_to_csr(
+    def labels_to(
         self,
+        out_format: str,
         data: dict[str, np.ndarray],
         threshold: Optional[float] = None,
-    ):
-        # Get all the arrays that we need.
-        node_labels = data["point_labels"]
-        edge_labels = data["edge_labels"]
-
-        point_types = data["point_types"]
-        edge_types = data["edge_types"]
-
-        edge_index = data["edge_index"]
-        neigh_isc = data["neigh_isc"]
-
-        nsc = data["nsc"].squeeze()
-
-        # Add back atomic contributions to the node blocks in case they were removed
-        if self.sub_point_matrix:
-            assert self.basis_table.point_matrix is not None, "Point matrices"
-            node_labels = node_labels + np.concatenate(
-                [
-                    self.basis_table.point_matrix[atom_type].ravel()
-                    for atom_type in point_types
-                ]
-            )
-
-        # Get the values for the edge blocks and the pointer to the start of each block.
-        if self.symmetric_matrix:
-            edge_index = edge_index[:, ::2]
-            edge_types = edge_types[::2]
-            neigh_isc = neigh_isc[::2]
-
-        n_orbitals = [point.basis_size for point in self.basis_table.basis]
-        orbitals = [n_orbitals[at_type] for at_type in point_types]
-
-        nsc = data["nsc"].squeeze()
-
-        # Construct the matrix.
-        matrix = nodes_and_edges_to_csr(
-            node_vals=node_labels,
-            edge_vals=edge_labels,
-            edge_index=edge_index,
-            edge_neigh_isc=neigh_isc,
-            n_supercells=np.prod(nsc),
-            orbitals=orbitals,
-            symmetrize_edges=self.symmetric_matrix,
-            threshold=threshold,
-        )
-
-        return matrix
-
-    def labels_to_sparse_orbital(
-        self,
-        data: dict[str, np.ndarray],
         coords_cartesian: bool = False,
-        threshold: Optional[float] = None,
-    ) -> sisl.SparseOrbital:
+        **kwargs,
+    ):
+        data_format = getattr(data.__class__, "_data_format", Formats.NODESEDGES)
+        if not conversions.has_converter(data_format, out_format):
+            converter = conversions.get_converter(data.__class__._format, out_format)
+            return converter(data, **kwargs)
+
         # Get all the arrays that we need.
         node_labels = data["point_labels"]
         edge_labels = data["edge_labels"]
@@ -810,15 +780,32 @@ class MatrixDataProcessor:
         edge_index = data["edge_index"]
         neigh_isc = data["neigh_isc"]
 
-        cell = data["cell"]
-        positions = data["positions"]
-
-        if not coords_cartesian:
-            # Cell and positions need to be converted to cartesian coordinates
-            cell = self.basis_to_cartesian(cell)
-            positions = self.basis_to_cartesian(positions)
-
         nsc = data["nsc"].squeeze()
+
+        if out_format.startswith("sisl"):
+            cell = data["cell"]
+            positions = data["positions"]
+
+            if not coords_cartesian:
+                # Cell and positions need to be converted to cartesian coordinates
+                cell = self.basis_to_cartesian(cell)
+                positions = self.basis_to_cartesian(positions)
+
+            unique_atoms = self.basis_table.get_sisl_atoms()
+
+            geometry = sisl.Geometry(
+                positions,
+                atoms=[unique_atoms[at_type] for at_type in point_types],
+                lattice=cell,
+            )
+            geometry.set_nsc(nsc)
+
+            kwargs["geometry"] = geometry
+        else:
+            kwargs["n_supercells"] = nsc.prod()
+
+            n_orbitals = [point.basis_size for point in self.basis_table.basis]
+            kwargs["orbitals"] = [n_orbitals[at_type] for at_type in point_types]
 
         # Add back atomic contributions to the node blocks in case they were removed
         if self.sub_point_matrix:
@@ -836,31 +823,22 @@ class MatrixDataProcessor:
             edge_types = edge_types[::2]
             neigh_isc = neigh_isc[::2]
 
-        unique_atoms = self.basis_table.get_sisl_atoms()
-
-        geometry = sisl.Geometry(
-            positions,
-            atoms=[unique_atoms[at_type] for at_type in point_types],
-            sc=cell,
-        )
-        geometry.set_nsc(nsc)
-
         # Construct the matrix.
-        matrix = nodes_and_edges_to_sparse_orbital(
+        matrix = conversions.get_converter(data_format, out_format)(
             node_vals=node_labels,
             edge_vals=edge_labels,
             edge_index=edge_index,
             edge_neigh_isc=neigh_isc,
-            geometry=geometry,
-            sp_class=self.matrix_cls,
             symmetrize_edges=self.symmetric_matrix,
             threshold=threshold,
+            **kwargs,
         )
 
-        # Remove atoms with no basis.
-        for i, point_basis in enumerate(self.basis_table.basis):
-            if point_basis.basis_size == 0:
-                matrix = matrix.remove(unique_atoms[i])
+        if out_format.startswith("sisl"):
+            # Remove atoms with no basis.
+            for i, point_basis in enumerate(self.basis_table.basis):
+                if point_basis.basis_size == 0:
+                    matrix = matrix.remove(unique_atoms[i])
 
         return matrix
 
@@ -875,21 +853,31 @@ class NumpyArraysProvider:
     However, if you use the arrays provider, you can be sure that you will receive ``numpy`` arrays.
     """
 
-    def __init__(self, data: BasisMatrixData):
+    def __init__(self, data: BasisMatrixDataBase):
         self.data = data
 
     def __getitem__(self, key) -> np.ndarray:
         return self.data.ensure_numpy(self.data[key])
 
     def __getattr__(self, key) -> np.ndarray:
-        return self.data.ensure_numpy(self.data[key])
+        return self[key]
 
     def __dir__(self):
         return dir(self.data)
 
 
-class BasisMatrixData:
+ArrayType = TypeVar("ArrayType", bound="BasisMatrixData")
+
+
+class BasisMatrixDataBase(Generic[ArrayType]):
     """Stores a graph with the preprocessed data for one or multiple configurations.
+
+    .. warning::
+
+        This class just implements the generic functionality and you should not use it directly.
+        Depending on the type of arrays that you use to store the data,
+        you should use the corresponding subclass. E.g. ``BasisMatrixData`` for ``numpy`` arrays,
+        or ``TorchBasisMatrixData`` for ``torch`` tensors.
 
     The differences between this class and ``BasisConfiguration`` are:
 
@@ -963,6 +951,13 @@ class BasisMatrixData:
     metadata :
         Contains any extra metadata that might be useful for the model or to
         postprocess outputs, for example.
+
+    See Also
+    ---------
+    BasisMatrixData
+        The subclass that uses `numpy` arrays to store the data.
+    graph2mat.bindings.torch.TorchBasisMatrixData
+        The subclass that uses `torch` tensors to store the data.
     """
 
     #: Sometimes it is useful to know explicitly which keys are node attributes
@@ -978,43 +973,43 @@ class BasisMatrixData:
 
     #: Shape (2, n_edges).
     #: Array with point pairs (their index in the configuration) that form an edge.
-    edge_index: np.ndarray
+    edge_index: ArrayType
 
     #: Shape (n_edges,).
     #: Array with the index of the supercell where the second point of each edge
     #: is located.
     #: This follows the conventions in ``sisl``
-    neigh_isc: np.ndarray
+    neigh_isc: ArrayType
 
     #: Shape (n_points, n_node_feats).
     #: Inputs for each point in the configuration.
-    node_attrs: np.ndarray
+    node_attrs: ArrayType
 
     #: Shape (n_points, 3).
     #: Coordinates of each point in the configuration, **in the convention specified
     #: by the data processor (e.g. spherical harmonics)**.
     #: IMPORTANT: This is not necessarily in cartesian coordinates.
-    positions: np.ndarray
+    positions: ArrayType
 
     #: Shape (n_edges, 3).
     #: Shift of the second atom in each edge with respect to its
     #: image in the primary cell, **in the convention specified
     #: by the data processor (e.g. spherical harmonics)**.
     #: IMPORTANT: This is not necessarily in cartesian coordinates.
-    shifts: np.ndarray
+    shifts: ArrayType
 
     #: Shape (3,3).
     #: Lattice vectors of the unit cell, **in the convention specified
     #: by the data processor (e.g. spherical harmonics)**.
     #: IMPORTANT: This is not necessarily in cartesian coordinates.
-    cell: np.ndarray
+    cell: ArrayType
 
     #: Total number of auxiliary cells.
     n_supercells: int
 
     #: Number of auxiliary cells required in each direction to account for
     #: all neighbor interactions.
-    nsc: np.ndarray
+    nsc: ArrayType
 
     #: Shape (n_point_labels,).
     #: The elements of the target matrix that correspond to interactions
@@ -1022,7 +1017,7 @@ class BasisMatrixData:
     #: each block might have different shape.
     #:
     #: All values for a given block come consecutively and in row-major order.
-    point_labels: np.ndarray
+    point_labels: ArrayType
 
     #: Shape (n_edge_labels,).
     #: The elements of the target matrix that correspond to interactions
@@ -1030,22 +1025,22 @@ class BasisMatrixData:
     #: each block might have different shape.
     #:
     #: All values for a given block come consecutively and in row-major order.
-    edge_labels: np.ndarray
+    edge_labels: ArrayType
 
     #: Shape (n_points,).
     #: The type of each point (index in the basis table, i.e.
     #: a `BasisTableWithEdges`).
-    point_types: np.ndarray
+    point_types: ArrayType
 
     #: Shape (n_edges,).
     #: The type of each edge as defined by the basis table, i.e.
     #: a `BasisTableWithEdges`.
-    edge_types: np.ndarray
+    edge_types: ArrayType
 
     #: Shape (n_edge_types,).
     #: Edge labels are sorted by edge type. This array contains the number of
     #: labels for each edge type.
-    edge_type_nlabels: np.ndarray
+    edge_type_nlabels: ArrayType
 
     labels_point_filter: np.ndarray
     labels_edge_filter: np.ndarray
@@ -1053,6 +1048,21 @@ class BasisMatrixData:
     #: Contains any extra metadata that might be useful for the model or to
     #: postprocess outputs, for example. It includes the data processor.
     metadata: Dict[str, Any]
+
+    _init_keys = (
+        "edge_index",
+        "neigh_isc",
+        "node_attrs",
+        "positions",
+        "shifts",
+        "cell",
+        "nsc",
+        "point_labels",
+        "edge_labels",
+        "point_types",
+        "edge_types",
+        "edge_type_nlabels",
+    )
 
     def __init__(
         # All arguments must be optional in order for the get_example method of a batch to work
@@ -1073,6 +1083,7 @@ class BasisMatrixData:
         edge_type_nlabels: Optional[np.ndarray] = None,  # [n_edge_types]
         data_processor: MatrixDataProcessor = None,
         metadata: Optional[Dict[str, Any]] = None,
+        already_basis: bool = False,
     ):
         self._data = self._sanitize_data(
             edge_index=edge_index,
@@ -1091,6 +1102,7 @@ class BasisMatrixData:
             edge_type_nlabels=edge_type_nlabels,
             data_processor=data_processor,
             metadata=metadata,
+            already_basis=already_basis,
         )
 
         for k in self._data:
@@ -1114,6 +1126,7 @@ class BasisMatrixData:
         edge_type_nlabels: Optional[np.ndarray] = None,  # [n_edge_types]
         data_processor: MatrixDataProcessor = None,
         metadata: Optional[Dict[str, Any]] = None,
+        already_basis: bool = False,
     ) -> Dict[str, Any]:
         # Check shapes
         num_nodes = node_attrs.shape[0] if node_attrs is not None else None
@@ -1163,13 +1176,98 @@ class BasisMatrixData:
         # We do the change in the inputs (coordinates, which are vectors) because it's much simpler
         # than doing it in the outputs (spherical harmonics with arbitrary l)
         # Matrix with the change of basis to go from cartesian coordinates to spherical harmonics.
-        for k in ["positions", "shifts", "cell"]:
-            if data[k] is not None:
-                data[k] = data_processor.cartesian_to_basis(
-                    data[k], process_cob_array=self.process_input_array
-                )
+        if not already_basis:
+            for k in ["positions", "shifts", "cell"]:
+                if data[k] is not None:
+                    data[k] = data_processor.cartesian_to_basis(
+                        data[k], process_cob_array=self.process_input_array
+                    )
 
         return data
+
+    def copy(self, cls: Optional[type[BasisMatrixDataBase]] = None):
+        """Copy data object, optionally to a different class.
+
+        Note that this does not copy the data arrays unless necessary
+        (e.g. conversion from torch tensors to numpy arrays). It only
+        creates a new container for the same data.
+
+        Parameters
+        ----------
+        cls :
+            The class of the new object to create. If None, the object
+            is copied into an object of the same class.
+        """
+
+        if cls is None:
+            cls = self.__class__
+
+        np_arrays = self.numpy_arrays()
+        kwargs = {k: np_arrays[k] for k in self._init_keys}
+        kwargs["metadata"] = self._data["metadata"]
+        kwargs["data_processor"] = kwargs["metadata"].get("data_processor")
+
+        return cls(**kwargs, already_basis=True)
+
+    def __init_subclass__(cls):
+        # Register the python class as an alias for its format (which should be indicated
+        # in the _format attribute of the class).
+        if "_format" in cls.__dict__:
+            Formats.add_alias(cls._format, cls)
+
+            @conversions.converter(cls._format, Formats.BASISMATRIXDATA)
+            def _(data) -> BasisMatrixData:
+                return data.copy(cls=BasisMatrixData)
+
+            conversions.register_converter(
+                Formats.BASISCONFIGURATION, cls._format, cls.from_config
+            )
+            conversions.register_converter(
+                Formats.ORBITALCONFIGURATION, cls._format, cls.from_config
+            )
+
+        if "_format" in cls.__dict__ and hasattr(cls, "_data_format"):
+            cls_format = cls._format
+            nodesedges_format = cls._data_format
+
+            def _register_basis_matrix_data(source, target, converter, manager):
+                if source == nodesedges_format:
+                    if manager.has_converter(cls_format, target):
+                        return
+
+                    def _nodes_and_edges(
+                        data, threshold: Optional[float] = None, **kwargs
+                    ):
+                        data_processor = data.metadata["data_processor"]
+                        return data_processor.labels_to(
+                            target, data=data, threshold=threshold, **kwargs
+                        )
+
+                    manager.register_converter(cls_format, target, _nodes_and_edges)
+
+                if source == Formats.BASISMATRIXDATA:
+                    if manager.has_converter(cls_format, target):
+                        return
+
+                    to_basis_matrix = manager.get_converter(
+                        cls_format, Formats.BASISMATRIXDATA
+                    )
+
+                    manager.register_expanded_converter(
+                        source,
+                        target,
+                        cls_format,
+                        Formats.BASISMATRIXDATA,
+                        to_basis_matrix,
+                    )
+
+                if target in (Formats.BASISCONFIGURATION, Formats.ORBITALCONFIGURATION):
+                    if not manager.has_converter(source, cls_format):
+                        manager.register_converter(source, cls_format, cls.new)
+
+            conversions.add_callback(_register_basis_matrix_data, retroactive=True)
+
+        return super().__init_subclass__()
 
     def __getitem__(self, key: str) -> Any:
         return self._data[key]
@@ -1309,36 +1407,32 @@ class BasisMatrixData:
 
     def process_input_array(self, key: str, array: np.ndarray) -> Any:
         """This function might be implemented by subclasses to e.g. convert the array to a torch tensor."""
-        return array
+        if self._array_format != Formats.NUMPY:
+            return conversions.get_converter(Formats.NUMPY, self._array_format)(array)
+        else:
+            return array
 
     def ensure_numpy(self, array: Any) -> np.ndarray:
         """This function might be implemented by subclasses to convert from their output to numpy arrays.
 
         This is called by post processing utilities so that they can be sure they are dealing with numpy arrays.
         """
-        return np.array(array)
+        if self._array_format != Formats.NUMPY:
+            return conversions.get_converter(self._array_format, Formats.NUMPY)(array)
+        else:
+            return np.array(array)
 
     def numpy_arrays(self) -> NumpyArraysProvider:
         """Returns object that provides data as numpy arrays."""
         return NumpyArraysProvider(self)
 
-    def to_csr(self, threshold: float = 1e-8) -> sisl.SparseOrbital:
+    def convert_to(self, out_format: str, threshold: Optional[float] = None, **kwargs):
         # Get the metadata to process things
         data_processor = self.metadata["data_processor"]
 
-        # Make sure we are dealing with numpy arrays
-        arrays = self.numpy_arrays()
-
-        return data_processor.labels_to_csr(arrays, threshold=threshold)
-
-    def to_sparse_orbital_matrix(self, threshold: float = 1e-8) -> sisl.SparseOrbital:
-        # Get the metadata to process things
-        data_processor = self.metadata["data_processor"]
-
-        # Make sure we are dealing with numpy arrays
-        arrays = self.numpy_arrays()
-
-        return data_processor.labels_to_sparse_orbital(arrays, threshold=threshold)
+        return data_processor.labels_to(
+            out_format, data=self, threshold=threshold, **kwargs
+        )
 
     def node_types_subgraph(self, node_types: np.ndarray) -> "BasisMatrixData":
         """Returns a subgraph with only the nodes of the given types.
@@ -1389,3 +1483,49 @@ class BasisMatrixData:
                 new_data["edge_type_nlabels"][:, i] = 0
 
         return self.__class__(**new_data)
+
+    def is_node_attr(self, key: str) -> bool:
+        return key in self._node_attr_keys
+
+    def is_edge_attr(self, key: str) -> bool:
+        return key in self._edge_attr_keys
+
+
+class BasisMatrixData(BasisMatrixDataBase[np.ndarray]):
+    """Version of ``BasisMatrixDataBase`` that stores data as numpy arrays.
+
+    See Also
+    --------
+    BasisMatrixDataBase
+        The base class that actually implements all the processing.
+    """
+
+    _format = Formats.BASISMATRIXDATA
+    _data_format = Formats.NODESEDGES
+    _array_format = Formats.NUMPY
+
+
+def _register_basis_matrix_data(source, target, converter, manager):
+    """Register the conversion between ``BasisMatrixData`` to other formats.
+
+    NodesEdges is a pseudo-format which is composed of the arrays that the
+    BasisMatrixData object stores. We take whatever conversion that can be
+    done from NodesEdges and define this same convertion starting from
+    ``BasisMatrixData`` instead.
+    """
+
+    if source == Formats.NODESEDGES:
+        if manager.has_converter(Formats.BASISMATRIXDATA, target):
+            return
+
+        def _nodes_and_edges(data, threshold: Optional[float] = None):
+            data_processor = data.metadata["data_processor"]
+
+            arrays = data.numpy_arrays()
+
+            return data_processor.labels_to(target, data=arrays, threshold=threshold)
+
+        manager.register_converter(Formats.BASISMATRIXDATA, target, _nodes_and_edges)
+
+
+conversions.add_callback(_register_basis_matrix_data, retroactive=True)

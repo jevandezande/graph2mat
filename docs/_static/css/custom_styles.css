@@ -46,3 +46,18 @@ div.nbinput .prompt, div.nboutput .prompt {
 div.nblast.container {
     margin-bottom: 24px;
 }
+
+/* Format the header of conversion functions */
+div.g2m-conversion-func-header {
+    padding: 5px;
+    background-color: rgb(196, 252, 191);
+}
+
+div.g2m-conversion-func-header p {
+    padding: 0;
+    margin: 0;
+}
+
+div.g2m-conversion-func-header + dl.py.function dt{
+    scroll-margin-top: 50px;
+}

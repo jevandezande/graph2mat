@@ -13,6 +13,7 @@ from copy import copy
 from typing import Any, Tuple, Dict, Type, Callable, Union
 import numpy as np
 
+from .formats import Formats
 from .processing import MatrixDataProcessor
 
 __all__ = [
@@ -791,7 +792,7 @@ def normalized_density_error(
     This is the error of the density in real space divided by the number of electrons.
     """
     import sisl
-    from graph2mat import BasisMatrixData
+    from graph2mat import BasisMatrixDataBase
 
     # Get the errors in the density matrix. Make sure that NaNs are set to 0, which
     # basically means that they will have no influence on the error.
@@ -800,13 +801,13 @@ def normalized_density_error(
     )
     errors[1][_isnan(errors[1])] = 0
 
-    if isinstance(batch, BasisMatrixData):
+    if isinstance(batch, BasisMatrixDataBase):
         # We haven't really received a batch, but just a single structure.
         # Do as if we received a batch of size 1.
         matrix_error = copy(batch)
         matrix_error.point_labels = errors[0]
         matrix_error.edge_labels = errors[1]
-        matrix_errors = [matrix_error.to_sparse_orbital_matrix()]
+        matrix_errors = [matrix_error.convert_to(Formats.SISL_DM)]
     else:
         # Create an iterator that returns the error for each structure in the batch
         # as a sisl DensityMatrix.
