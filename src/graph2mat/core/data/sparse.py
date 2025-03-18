@@ -3,9 +3,10 @@
 Different sparse representations of a matrix are required during the different
 steps of a typical workflow using `graph2mat`.
 """
-from typing import Dict, Tuple, Type, Optional
+from typing import Dict, Tuple, Type, Optional, Callable, Any
 
 import itertools
+from functools import partial
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -14,9 +15,58 @@ from sisl.physics.sparse import SparseOrbital
 from scipy.sparse import coo_array, csr_array
 
 from .matrices import BasisMatrix, OrbitalMatrix
+from .formats import Formats, conversions
 from ._sparse import _csr_to_block_dict
 
 
+def register_all_sisl(source, target, converter, manager):
+    if target != Formats.SISL:
+        return
+
+    specific_targets = [
+        (Formats.SISL_H, sisl.Hamiltonian),
+        (Formats.SISL_DM, sisl.DensityMatrix),
+        (Formats.SISL_EDM, sisl.EnergyDensityMatrix),
+    ]
+
+    for specific_target, sp_class in specific_targets:
+        if manager.has_converter(source, specific_target):
+            continue
+
+        specific_converter = partial(converter, sp_class=sp_class)
+        manager.register_converter(source, specific_target, specific_converter)
+
+
+conversions.add_callback(register_all_sisl)
+
+# -----------------------------------------------
+#            Conversion functions
+# -----------------------------------------------
+
+converter = conversions.converter
+
+
+@converter
+def _csr_to_numpy(csr: csr_array) -> np.ndarray:
+    return csr.toarray()
+
+
+@converter
+def _coo_to_csr(coo: coo_array) -> csr_array:
+    return coo.tocsr()
+
+
+@converter
+def _csr_to_coo(csr: csr_array) -> coo_array:
+    return csr.tocoo()
+
+
+@converter
+def _coo_to_numpy(coo: coo_array) -> np.ndarray:
+    return coo.toarray()
+
+
+@converter(Formats.SCIPY_CSR, Formats.BASISMATRIX)
 def csr_to_block_dict(
     spmat: sisl.SparseCSR,
     atoms: sisl.Atoms,
@@ -28,15 +78,15 @@ def csr_to_block_dict(
 
     Parameters
     ----------
-    spmat :
+    spmat
         The sparse matrix to convert to a block dictionary.
-    atoms :
+    atoms
         The atoms object for the matrix, containing orbital information.
-    nsc :
+    nsc
         The auxiliary supercell size.
-    matrix_cls :
+    matrix_cls
         Matrix class to initialize.
-    geometry_atoms :
+    geometry_atoms
         The atoms object for the full geometry. This allows the matrix to contain
         atoms without any orbital. Geometry atoms should contain the matrix atoms
         first and then the orbital-less atoms.
@@ -60,6 +110,7 @@ def csr_to_block_dict(
         return matrix_cls(block_dict=block_dict, nsc=nsc, basis_count=orbitals)
 
 
+@converter(Formats.BLOCK_DICT, Formats.SCIPY_COO)
 def block_dict_to_coo(
     block_dict: Dict[Tuple[int, int, int], np.ndarray],
     first_orb: np.ndarray,
@@ -96,24 +147,6 @@ def block_dict_to_coo(
     return coo_array((data, (rows, cols)), (no, no * n_supercells))
 
 
-def block_dict_to_csr(
-    block_dict: Dict[Tuple[int, int, int], np.ndarray],
-    first_orb: np.ndarray,
-    n_supercells: int = 1,
-    threshold: float = 1e-8,
-) -> csr_array:
-    """Converts a block dictionary into a csr array.
-
-    It just uses the conversion to coo, and then converts that to a csr array.
-    """
-    return block_dict_to_coo(
-        block_dict=block_dict,
-        first_orb=first_orb,
-        n_supercells=n_supercells,
-        threshold=threshold,
-    ).tocsr()
-
-
 def _blockmatrix_coo_coords(
     orbitals: ArrayLike,
     edge_index: ArrayLike,
@@ -127,9 +160,9 @@ def _blockmatrix_coo_coords(
 
         - All node blocks contain nonzero entries.
         - Edge blocks for edges included in `edge_index` contain
-          nonzero entries.
+        nonzero entries.
         - All individual blocks are dense. I.e. if a block "exists",
-          there are non-zero entries for all of its elements.
+        there are non-zero entries for all of its elements.
 
     The order of the coordinates returned by this function is:
 
@@ -225,7 +258,9 @@ def _blockmatrix_coo_coords(
     return np.array(rows), np.array(cols), (no, no * n_supercells)
 
 
-def nodes_and_edges_to_coo(
+def _nodes_and_edges_to_coo(
+    concatenate: Callable[[tuple[ArrayLike, ArrayLike, ArrayLike]], ArrayLike],
+    init_coo: Callable[[ArrayLike, np.ndarray, np.ndarray, tuple[int, int]], Any],
     node_vals: ArrayLike,
     edge_vals: ArrayLike,
     edge_index: ArrayLike,
@@ -234,14 +269,47 @@ def nodes_and_edges_to_coo(
     edge_neigh_isc: Optional[ArrayLike] = None,
     threshold: Optional[float] = None,
     symmetrize_edges: bool = False,
-) -> coo_array:
+) -> Any:
     """Converts an orbital matrix from node and edges array to coo.
 
-    Conversions to any other sparse structure can be done once we've got the coo array.
+    This is a generic function that can be used to convert to any coo format
+    (e.g. scipy coo or torch coo).
 
     Parameters
-    -----------
-    symmetrize_edges: bool, optional
+    ----------
+    concatenate
+        function to concatenate the node and edge values to generate the full array
+        of values. It receives a list of arrays like:
+
+        - [node_vals, edge_vals, edge_vals] if ``symmetrize_edges`` is ``True``.
+        - [node_vals, edge_vals] otherwise.
+    init_coo
+        function to initialize the coo array. It receives four arguments:
+
+        - The matrix values (as returned by ``concatenate``).
+        - The rows corresponding to the matrix values.
+        - The columns corresponding to the matrix values.
+        - The shape of the matrix.
+    node_vals
+        Flat array containing the values of the node blocks.
+        The order of the values is first by node index, then row then column.
+    edge_vals
+        Flat array containing the values of the edge blocks.
+        The order of the values is first by edge index, then row then column.
+    edge_index
+        Array of shape (2, n_edges) containing the indices of the atoms
+        that participate in each edge.
+    orbitals
+        Array of shape (n_nodes, ) containing the number of orbitals for each atom.
+    n_supercells
+        Number of auxiliary supercells.
+    edge_neigh_isc
+        Array of shape (n_edges, ) containing the supercell index of the second atom
+        in each edge with respect to the first atom.
+        If not provided, all interactions are assumed to be in the unit cell.
+    threshold
+        Matrix elements with a value below this number are set to 0.
+    symmetrize_edges
         whether for each edge only one direction is provided. The edge block for the
         opposite direction is then created as the transpose.
     """
@@ -255,9 +323,9 @@ def nodes_and_edges_to_coo(
     )
 
     if symmetrize_edges:
-        sparse_data = np.concatenate([node_vals, edge_vals, edge_vals])
+        sparse_data = concatenate([node_vals, edge_vals, edge_vals])
     else:
-        sparse_data = np.concatenate([node_vals, edge_vals])
+        sparse_data = concatenate([node_vals, edge_vals])
 
     if threshold is not None:
         mask = abs(sparse_data) > threshold
@@ -269,35 +337,68 @@ def nodes_and_edges_to_coo(
     rows = rows[mask]
     cols = cols[mask]
 
-    return coo_array((sparse_data, (rows, cols)), shape)
+    return init_coo(sparse_data, rows, cols, shape)
 
 
-def nodes_and_edges_to_csr(
-    node_vals: ArrayLike,
-    edge_vals: ArrayLike,
-    edge_index: ArrayLike,
-    orbitals: ArrayLike,
+@converter(Formats.NODESEDGES, Formats.SCIPY_COO)
+def nodes_and_edges_to_coo(
+    node_vals: np.ndarray,
+    edge_vals: np.ndarray,
+    edge_index: np.ndarray,
+    orbitals: np.ndarray,
     n_supercells: int = 1,
-    edge_neigh_isc: Optional[ArrayLike] = None,
+    edge_neigh_isc: Optional[np.ndarray] = None,
     threshold: Optional[float] = None,
     symmetrize_edges: bool = False,
-) -> csr_array:
-    """Converts an orbital matrix from node and edges array to csr.
+) -> coo_array:
+    """Converts an orbital matrix from node and edges array to scipy coo.
 
-    It just uses the conversion to coo, and then converts that to a csr array.
+    Conversions to any other sparse structure can be done once we've got the coo array.
+
+    Parameters
+    ----------
+    node_vals
+        Flat array containing the values of the node blocks.
+        The order of the values is first by node index, then row then column.
+    edge_vals
+        Flat array containing the values of the edge blocks.
+        The order of the values is first by edge index, then row then column.
+    edge_index
+        Array of shape (2, n_edges) containing the indices of the atoms
+        that participate in each edge.
+    orbitals
+        Array of shape (n_nodes, ) containing the number of orbitals for each atom.
+    n_supercells
+        Number of auxiliary supercells.
+    edge_neigh_isc
+        Array of shape (n_edges, ) containing the supercell index of the second atom
+        in each edge with respect to the first atom.
+        If not provided, all interactions are assumed to be in the unit cell.
+    threshold
+        Matrix elements with a value below this number are set to 0.
+    symmetrize_edges
+        whether for each edge only one direction is provided. The edge block for the
+        opposite direction is then created as the transpose.
     """
-    return nodes_and_edges_to_coo(
+
+    def _init_coo(data, rows, cols, shape):
+        return coo_array((data, (rows, cols)), shape)
+
+    return _nodes_and_edges_to_coo(
+        concatenate=np.concatenate,
+        init_coo=_init_coo,
         node_vals=node_vals,
         edge_vals=edge_vals,
         edge_index=edge_index,
-        edge_neigh_isc=edge_neigh_isc,
         orbitals=orbitals,
         n_supercells=n_supercells,
+        edge_neigh_isc=edge_neigh_isc,
         threshold=threshold,
         symmetrize_edges=symmetrize_edges,
-    ).tocsr()
+    )
 
 
+@converter(Formats.SCIPY_CSR, Formats.SISL)
 def csr_to_sisl_sparse_orbital(
     csr: csr_array,
     geometry: sisl.Geometry,
@@ -307,17 +408,18 @@ def csr_to_sisl_sparse_orbital(
     return sp_class.fromsp(geometry, csr)
 
 
+@converter(Formats.NODESEDGES, Formats.SISL)
 def nodes_and_edges_to_sparse_orbital(
-    node_vals: ArrayLike,
-    edge_vals: ArrayLike,
-    edge_index: ArrayLike,
+    node_vals: np.ndarray,
+    edge_vals: np.ndarray,
+    edge_index: np.ndarray,
     geometry: sisl.Geometry,
     sp_class: Type[SparseOrbital] = SparseOrbital,
-    edge_neigh_isc: Optional[ArrayLike] = None,
+    edge_neigh_isc: Optional[np.ndarray] = None,
     threshold: float = 1e-8,
     symmetrize_edges: bool = False,
 ) -> SparseOrbital:
-    new_csr = nodes_and_edges_to_csr(
+    new_csr = conversions.get_converter(Formats.NODESEDGES, Formats.SCIPY_CSR)(
         node_vals=node_vals,
         edge_vals=edge_vals,
         edge_index=edge_index,
@@ -327,5 +429,8 @@ def nodes_and_edges_to_sparse_orbital(
         threshold=threshold,
         symmetrize_edges=symmetrize_edges,
     )
+
+    new_csr.indices = new_csr.indices.astype(np.int32)
+    new_csr.indptr = new_csr.indptr.astype(np.int32)
 
     return csr_to_sisl_sparse_orbital(new_csr, geometry=geometry, sp_class=sp_class)

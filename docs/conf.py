@@ -66,6 +66,7 @@ extensions = [
 ]
 napoleon_numpy_docstring = True
 napoleon_use_param = True
+napoleon_custom_sections = ["Haha"]
 
 # There currently is a bug with mathjax >= 3, so we resort to 2.7.7
 # mathjax_path = "https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.7/latest.js?config=TeX-AMS-MML_HTMLorMML"
@@ -233,3 +234,99 @@ intersphinx_mapping = {
     "torch": ("https://pytorch.org/docs/stable/", None),
     "e3nn": ("https://docs.e3nn.org/en/stable/", None),
 }
+
+# Write the documentation for available conversions.
+
+from graph2mat import conversions
+from graph2mat.bindings.torch import *
+
+docs_root = pathlib.Path(__file__).parent
+# Write the conversion functions to a file
+with open(docs_root / "api" / "conversions.rst", "w") as f:
+    f.write(
+        """
+.. _g2m.conversions:
+
+Format conversions
+==================
+
+When `graph2mat` is initialized, a global `graph2mat.ConversionManager` is created and made available
+at `graph2mat.conversions`. It can be imported like:
+
+.. code-block:: python
+
+    import graph2mat
+    # Use it like
+    graph2mat.conversions
+
+    # Or alternatively
+    from graph2mat import conversions
+
+This conversion manager contains all the conversions between formats implemented in `graph2mat`.
+
+.. note::
+    See the documentation of `graph2mat.ConversionManager` for some remarks on how to
+    access/use the existing converters, as well as how to add new ones.
+
+.. currentmodule:: graph2mat.conversions
+
+Summary of available conversions
+--------------------------------
+
+The following table summarizes all the available conversions.
+Each row contains:
+
+- **Source**: The format to convert from.
+- **Target**: The format to convert to.
+- **Function**: The function that performs the conversion, click on it to go to its documentation.
+
+See `graph2mat.Formats` for a list of all available formats, together with
+a description of what each format is.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 20 20 60
+
+    * - Source
+      - Target
+      - Function
+
+"""
+    )
+    converters_list = list(
+        (source, target, f"{source}_to_{target}", converter)
+        for (source, target), converter in sorted(conversions._converters.items())
+    )
+
+    for source, target, func_name, converter in converters_list:
+        f.write(
+            f"""
+    * - {source}
+      - {target}
+      - :func:`{func_name}`
+"""
+        )
+
+    f.write(
+        """
+
+Documentation of conversion functions
+-------------------------------------
+
+"""
+    )
+    # Write a list with all available conversions and a link to the function
+    for source, target, func_name, converter in converters_list:
+        source_format = Formats.string_to_attr_name(source)
+        target_format = Formats.string_to_attr_name(target)
+
+        f.write(
+            f"""
+
+.. container:: g2m-conversion-func-header
+
+    :func:`Formats.{source_format}` -> :func:`Formats.{target_format}`\n\n
+
+"""
+        )
+        f.write(f".. autofunction:: {func_name}\n")

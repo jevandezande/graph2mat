@@ -26,7 +26,7 @@ from graph2mat.tools.viz import plot_basis_matrix
 
 class MatrixWriter(Callback):
     """Callback to write predicted matrices to disk."""
-    
+
     def __init__(
         self,
         output_file: str,
@@ -34,17 +34,12 @@ class MatrixWriter(Callback):
             "train",
             "val",
             "test",
-            "predict"
+            "predict",
         ],  # I don't know why, but Sequence[str] breaks the lightning CLI
     ):
         super().__init__()
 
-        splits = [
-            "train",
-            "val",
-            "test",
-            "predict"
-        ]
+        splits = ["train", "val", "test", "predict"]
 
         if splits in ["train", "val", "test", "predict"]:
             splits = [splits]
@@ -74,7 +69,7 @@ class MatrixWriter(Callback):
         # Loop through structures in the batch
         for matrix_data in matrix_iter:
             sparse_orbital_matrix = matrix_data.to_sparse_orbital_matrix()
-            
+
             # Get the path from which this structure was read.
             path = matrix_data.metadata["path"]
             out_file = Path(self.output_file.replace("$name$", path.parent.name))
@@ -86,7 +81,6 @@ class MatrixWriter(Callback):
 
             # And write the matrix to it.
             sparse_orbital_matrix.write(out_file)
-
 
     def on_train_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=None
@@ -111,7 +105,7 @@ class MatrixWriter(Callback):
             self._on_batch_end(
                 "test", trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
             )
-    
+
     def on_predict_batch_end(
         self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=None
     ):
@@ -119,7 +113,6 @@ class MatrixWriter(Callback):
             self._on_batch_end(
                 "predict", trainer, pl_module, outputs, batch, batch_idx, dataloader_idx
             )
-
 
 
 class SamplewiseMetricsLogger(Callback):
@@ -410,7 +403,7 @@ class PlotMatrixError(Callback):
             geometry = sisl.Geometry(
                 self.positions,
                 atoms=[basis_table.atoms[at_type] for at_type in self.point_types],
-                sc=self.cell,
+                lattice=self.cell,
             )
 
             geometry.set_nsc(self.nsc)

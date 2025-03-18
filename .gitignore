@@ -24,6 +24,7 @@ build/
 # Docs
 docs/build
 docs/api/api-generated
+docs/api/conversions.rst
 
 # Jupyter notebook checkpoints
 **/.ipynb_checkpoints

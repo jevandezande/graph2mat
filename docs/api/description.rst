@@ -73,18 +73,44 @@ These classes are used to store the data of your dataset.
 `BasisConfiguration` and `OrbitalConfiguration` are used to store the raw information
 of a structure, including its coordinates, atomic numbers and corresponing matrix.
 
-`BasisMatrixData` is a container that stores the configuration in the shape of a graph,
+`BasisMatrixDataBase` (and its subclasses) is a container that stores the configuration in the shape of a graph,
 ready to be used by models. It contains, for example, information about the edges. This
-class is ready to be batched. It uses `numpy` arrays, therefore to use it in `torch` you
-need to use the extension provided in `graph2mat.bindings.torch`.
+class is ready to be batched. However, the `BasisMatrixDataBase` class is just a base class
+and you are never going to use it directly. Instead, you will use a subclass of it that handles
+a given type of arrays (e.g. `numpy` arrays, `torch` tensors...). The core library provides
+one for `numpy` arrays, `BasisMatrixData`. For the variant that deals with `torch` tensors
+for example, you will need to use the subclass provided in `graph2mat.bindings.torch`.
 
 .. autosummary::
     :toctree: api-generated/
     :template: autosummary/custom-class-template.rst
 
+    BasisMatrixDataBase
     BasisMatrixData
     BasisConfiguration
     OrbitalConfiguration
+
+Formats
+*******
+
+Handling sparse matrices for associated 3D point clouds with basis functions is sometimes
+not straightforward. For each different task (e.g. training a ML model, computing a property...)
+there might be some data format that is more convenient. To the user (and the developer), converting
+from any format to any other target format can be a pain. In `graph2mat`, we try to centralize
+this task by:
+
+- Having a class, `Formats`, that contains all the formats that we support.
+- Having a class that manages the conversions between these formats: `ConversionManager``.
+
+An instance of `ConversionManager` is available at ``graph2mat.conversions``, which all
+the conversions implemented by graph2mat. See them here: :ref:`g2m.conversions`.
+
+.. autosummary::
+    :toctree: api-generated/
+    :template: autosummary/custom-class-template.rst
+
+    Formats
+    ConversionManager
 
 Other useful top level modules
 *******************************
