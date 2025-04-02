@@ -458,6 +458,9 @@ def _sisl_to_orbital_configuration(
             nsc=matrix.nsc,
             matrix_cls=matrix_cls,
             geometry_atoms=geometry.atoms,
+            fill_value=np.nan
+            if isinstance(matrix, (sisl.DensityMatrix, sisl.EnergyDensityMatrix))
+            else 0.0,
         )
 
         kwargs["matrix"] = matrix_block

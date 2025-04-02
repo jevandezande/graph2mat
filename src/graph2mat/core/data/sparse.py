@@ -73,6 +73,7 @@ def csr_to_block_dict(
     nsc: np.ndarray,
     geometry_atoms: Optional[sisl.Atoms] = None,
     matrix_cls: Type[BasisMatrix] = OrbitalMatrix,
+    fill_value: float = 0,
 ) -> BasisMatrix:
     """Creates a BasisMatrix object from a SparseCSR matrix
 
@@ -90,6 +91,11 @@ def csr_to_block_dict(
         The atoms object for the full geometry. This allows the matrix to contain
         atoms without any orbital. Geometry atoms should contain the matrix atoms
         first and then the orbital-less atoms.
+    fill_value
+        The value to use for the empty elements in the matrix. Use `np.nan` if the
+        matrix is not really sparse (empty elements are just elements that you don't
+        want to fit) like the density matrix. Models will not attempt to fit the
+        `np.nan` values.
     """
     orbitals = atoms.orbitals
 
@@ -100,6 +106,7 @@ def csr_to_block_dict(
         atom_first_orb=atoms.firsto,
         orbitals=orbitals,
         n_atoms=len(atoms.species),
+        fill_value=fill_value,
     )
 
     orbitals = geometry_atoms.orbitals if geometry_atoms is not None else atoms.orbitals

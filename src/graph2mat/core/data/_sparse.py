@@ -20,6 +20,7 @@ def _csr_to_block_dict(
     atom_first_orb: cython.int[:],
     orbitals: cython.int[:],
     n_atoms: cython.int,
+    fill_value: float = 0.0,
 ):
     # --- Cython annotations for increased performance (ignored if not compiled with cython)
     atom_i: cython.int
@@ -86,7 +87,7 @@ def _csr_to_block_dict(
                     block_dict[atom_i, atom_j, i_sc][orbital_i, orbital_j] = val
                 except KeyError:
                     block_dict[atom_i, atom_j, i_sc] = np.full(
-                        (orbitals[atom_i], orbitals[atom_j]), np.nan
+                        (orbitals[atom_i], orbitals[atom_j]), fill_value
                     )
                     block_dict[atom_i, atom_j, i_sc][orbital_i, orbital_j] = val
 
