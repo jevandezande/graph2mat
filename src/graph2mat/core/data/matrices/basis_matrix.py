@@ -96,7 +96,10 @@ class BasisMatrix:
             if self.basis_count[edge[0]] > 0 and self.basis_count[edge[1]] > 0
         ]
 
-        edge_values = np.concatenate(blocks)
+        if len(blocks) > 0:
+            edge_values = np.concatenate(blocks)
+        else:
+            edge_values = np.array([])
 
         return node_values, edge_values
 

@@ -1333,6 +1333,9 @@ class BasisMatrixDataBase(Generic[ArrayType]):
         # that we need to describe all interactions.
         sc_shifts = sc_shifts.T
 
+        # Check if there are any edges
+        any_edges = edge_index.shape[1] > 0
+
         # Get the number of supercells needed along each direction to account for all interactions
         if nsc is None:
             if config.matrix is not None:
@@ -1342,8 +1345,10 @@ class BasisMatrixDataBase(Generic[ArrayType]):
                 # for the sparse matrices.
                 # However, these nonzero elements don't have any effect on the electronic density.
                 nsc = config.matrix.nsc
-            else:
+            elif any_edges:
                 nsc = abs(sc_shifts).max(axis=1) * 2 + 1
+            else:
+                nsc = np.array([1, 1, 1])
 
         # Then build the supercell that encompasses all of those atoms, so that we can get the
         # array that converts from sc shifts (3D) to a single supercell index. This is isc_off.

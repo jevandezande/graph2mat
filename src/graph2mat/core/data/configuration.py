@@ -24,6 +24,7 @@ from scipy.sparse import issparse, csr_array
 
 from .basis import PointBasis, NoBasisAtom
 from .matrices import OrbitalMatrix, BasisMatrix, get_matrix_cls
+from .table import BasisTableWithEdges
 from .sparse import csr_to_block_dict
 from .formats import Formats, conversions
 
@@ -118,6 +119,10 @@ class BasisConfiguration:
     metadata: Optional[Dict[str, Any]] = None
 
     def __post_init__(self):
+        if isinstance(self.basis, BasisTableWithEdges):
+            # If the basis is a table, we need to convert it to a list of PointBasis objects
+            object.__setattr__(self, "basis", self.basis.basis)
+
         if self.matrix is not None and not isinstance(self.matrix, BasisMatrix):
             matrix = self.matrix
 
