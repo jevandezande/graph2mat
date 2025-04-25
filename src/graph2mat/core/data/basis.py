@@ -277,7 +277,7 @@ class PointBasis:
         for n_shells, l, parity in self.basis:
             for izeta in range(n_shells):
                 for m in range(-l, l + 1):
-                    orb = sisl.AtomicOrbital(n=3, l=l, m=m, zeta=izeta, R=R[i])
+                    orb = sisl.AtomicOrbital(n=3, l=l, m=m, zeta=izeta + 1, R=R[i])
                     orbitals.append(orb)
                     i += 1
 

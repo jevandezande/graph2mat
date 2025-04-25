@@ -34,6 +34,33 @@ class E3nnGraph2Mat(TorchGraph2Mat):
 
         The rest depend on what the preprocessing and block producing functions
         use.
+    basis_grouping :
+        Each point type in the dataset has a different basis set. In practice, this means
+        that the matrix blocks :math:`M_{ij}` can have different shapes and/or different
+        equivariant behaviors. This poses a problem for the definition of the :math:`f_n`
+        and :math:`f_e` functions, which need to have a fixed shape output.
+
+        Let's say there are :math:`N` different point types in the dataset.
+
+        With the ``basis_grouping`` argument, the user can choose how to handle this
+        complication:
+
+            - ``"point_type"``: Each point type is treated separately. There are then
+                :math:`N` different operations for the self interactions and :math:`N^2`
+                different operations for the interactions between different point types.
+                This is the most trivial approach, but it can quickly result in a huge number
+                of operations.
+
+            - ``"basis_shape"``: Groups all point types that have the same basis shape.
+                In a basis of spherical harmonics, "same basis shape" means that the number
+                of basis functions for each angular momentum :math:`\ell` is the same. Note
+                that the radial functions might differ, but they are not considered when
+                grouping.
+
+            - ``"max"``: Groups all point types into a single group. This is done by having
+                a single operation that predicts enough channels to cover all the point types.
+                Then a mask is applied for each point type to end up with the correctly sized
+                blocks.
     preprocessing_nodes:
         A module that preprocesses the node features before passing them to the
         node block producing functions. This is :math:`p_n` in the sketch.
@@ -178,6 +205,7 @@ class E3nnGraph2Mat(TorchGraph2Mat):
         self,
         unique_basis: Sequence[PointBasis],
         irreps: Dict[str, o3.Irreps],
+        basis_grouping: Literal["point_type", "basis_shape", "max"] = "point_type",
         preprocessing_nodes: Optional[Type[torch.nn.Module]] = None,
         preprocessing_nodes_kwargs: dict = {},
         preprocessing_edges: Optional[Type[torch.nn.Module]] = None,
@@ -203,6 +231,7 @@ class E3nnGraph2Mat(TorchGraph2Mat):
 
         super().__init__(
             unique_basis=unique_basis,
+            basis_grouping=basis_grouping,
             preprocessing_nodes=preprocessing_nodes,
             preprocessing_nodes_kwargs=preprocessing_nodes_kwargs,
             preprocessing_edges=preprocessing_edges,
