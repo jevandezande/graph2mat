@@ -1,4 +1,4 @@
-from typing import Type, Union, Optional
+from typing import Type, Union, Optional, Literal
 
 from e3nn import o3
 from mace.modules import MACE, InteractionBlock, RealAgnosticResidualInteractionBlock
@@ -49,6 +49,7 @@ class LitMACEMatrixModel(LitBasisMatrixModel):
         correlation: int = 1,
         # unique_atoms: Sequence[sisl.Atom],
         symmetric_matrix: bool = False,
+        basis_grouping: Literal["point_type", "basis_shape", "max"] = "point_type",
         preprocessing_nodes: Optional[Type[torch.nn.Module]] = None,
         preprocessing_edges: Optional[Type[torch.nn.Module]] = None,
         preprocessing_edges_reuse_nodes: bool = True,
@@ -110,6 +111,7 @@ class LitMACEMatrixModel(LitBasisMatrixModel):
                 preprocessing_edges_reuse_nodes=preprocessing_edges_reuse_nodes,
                 node_operation=node_block_readout,
                 edge_operation=edge_block_readout,
+                basis_grouping=basis_grouping,
             )
 
         else:

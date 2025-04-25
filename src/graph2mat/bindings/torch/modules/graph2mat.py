@@ -1,4 +1,5 @@
 """Torch wrappers for Graph2Mat."""
+import numpy as np
 import torch
 from types import ModuleType
 
@@ -42,7 +43,29 @@ class TorchGraph2Mat(Graph2Mat, torch.nn.Module):
             interactions_dict=interactions_dict,
         )
 
-    def _forward_interactions_init_arrays_kwargs(self, edge_types_array):
-        return {
-            "device": edge_types_array.device,
-        }
+    def _init_center_types(self, basis_grouping):
+        super()._init_center_types(basis_grouping)
+
+        for k in ("types_to_graph2mat", "edge_types_to_graph2mat"):
+            array = getattr(self, k, None)
+            if isinstance(array, np.ndarray):
+                # Register the buffer as a torch tensor
+                tensor = torch.from_numpy(getattr(self, k))
+                delattr(self, k)
+                self.register_buffer(k, tensor, persistent=False)
+
+    def _get_labels_resort_index(
+        self, types: torch.Tensor, original_types: torch.Tensor, **kwargs
+    ) -> torch.Tensor:
+        """Wrapping of the method to use torch instead of numpy."""
+        types = types.numpy(force=True)
+        original_types = original_types.numpy(force=True)
+
+        indices = super()._get_labels_resort_index(
+            types, original_types=original_types, **kwargs
+        )
+
+        if self.basis_grouping != "max":
+            indices = self.numpy.from_numpy(indices)
+
+        return indices

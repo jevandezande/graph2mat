@@ -12,7 +12,7 @@ In a typical matrix, there will be elements that belong to connections between
 different points. Therefore, these tables also need to keep track of edge types.
 """
 
-from typing import List, Sequence, Union, Generator, Optional, Callable
+from typing import List, Sequence, Union, Generator, Optional, Callable, Literal
 
 import itertools
 from pathlib import Path
@@ -50,81 +50,60 @@ class BasisTableWithEdges:
 
         However, this might not make any sense for your particular problem. In that
         case just don't use this argument.
-
-    Attributes
-    ----------
-    basis:
-        List of `PointBasis` objects that this table knows about.
-    basis_convention:
-        The spherical harmonics convention used for the basis.
-    types:
-        Type identifier for each point basis.
-    point_matrix:
-        The matrix that is constant for each type of point.
-
-        See the `get_point_matrix` argument for more details.
-    edge_type:
-        Shape (n_point_types, n_point_types).
-        The edge type for each pair of point types.
-    R:
-        Shape (n_point_types,).
-        The reach of each point type.
-    basis_size:
-        Shape (n_point_types,).
-        The number of basis functions for each point type.
-    point_block_shape:
-        Shape (n_point_types, 2).
-        The shape of self-interacting matrix blocks of each point type.
-    point_block_size:
-        Shape (n_point_types,).
-        The number of elements for self-interacting matrix blocks of each point type.
-    edge_block_shape:
-        Shape (n_edge_types, 2).
-        The shape of interaction matrix blocks of each edge type.
-    edge_block_size:
-        Shape (n_edge_types,).
-        The number of elements for interaction matrix blocks of each edge type.
-    change_of_basis:
-        Shape (3, 3).
-        The change of basis matrix from cartesian to the convention of the basis.
-    change_of_basis_inv:
-        Shape (3, 3).
-        The change of basis matrix from the convention of the basis to cartesian.
-    file_names:
-        If the basis was read from files, this might store the names of the files.
-
-        For saving/loading purposes.
-    file_contents:
-        If the basis was read from files, this might store the contents of the files.
-
-        For saving/loading purposes.
-    edge_type_to_point_types:
-        Shape (n_edge_types, 2).
-
-        For each (positive) edge index, returns the pair of point types that make it.
     """
 
+    #: List of ``PointBasis`` objects that this table knows about.
     basis: List[PointBasis]
+    #: The spherical harmonics convention used for the basis
+    #: (same for all ``PointBasis``).
     basis_convention: BasisConvention
+    #: Type identifier for each point basis.
     types: List[Union[str, int]]
 
+    #: The matrix that is constant for each type of point.
     point_matrix: Union[List[np.ndarray], None]
+    #: The edge type for each pair of point types.
+    #: Array of shape (n_point_types, n_point_types).
     edge_type: np.ndarray
+    #: Shape (n_point_types,).
+    #: The reach of each point type.
     R: np.ndarray
+    #: Shape (n_point_types,).
+    #: The number of basis functions for each point type.
     basis_size: np.ndarray
+    #: Shape (n_point_types, 2).
+    #: The shape of self-interacting matrix blocks of each point type.
     point_block_shape: np.ndarray
+    #: Shape (n_point_types,).
+    #: The number of elements for self-interacting matrix blocks of each point type.
     point_block_size: np.ndarray
+    #: Shape (n_edge_types, 2).
+    #: The shape of interaction matrix blocks of each edge type.
     edge_block_shape: np.ndarray
+    #: Shape (n_edge_types,).
+    #: The number of elements for interaction matrix blocks of each edge type.
     edge_block_size: np.ndarray
 
+    #: Shape (n_edge_types, 2).
+    #: For each (positive) edge index, returns the pair of point types that make it.
+    #: This performs the inverse operation of ``edge_type``.
     edge_type_to_point_types: np.ndarray
 
+    #: Shape (3, 3).
+    #: The change of basis matrix from cartesian to the convention of the basis.
     change_of_basis: np.ndarray
+    #: Shape (3, 3).
+    #: The change of basis matrix from the convention of the basis to cartesian.
     change_of_basis_inv: np.ndarray
 
     # These are used for saving the object in a more
     # human readable and portable way than regular pickling.
+
+    #: If the basis was read from files, this might store the names of the files.
+    #: For saving/loading purposes.
     file_names: Optional[List[str]]
+    #: If the basis was read from files, this might store the contents of the files.
+    #: For saving/loading purposes.
     file_contents: Optional[List[str]]
 
     def __init__(
@@ -265,6 +244,154 @@ class BasisTableWithEdges:
         same &= np.allclose(self.edge_block_shape, other.edge_block_shape)
         same &= np.allclose(self.edge_block_size, other.edge_block_size)
         return same
+
+    def group(
+        self, grouping: Literal["basis_shape", "point_type", "max"]
+    ) -> tuple["BasisTableWithEdges", np.ndarray, np.ndarray, Optional[np.ndarray]]:
+        """Groups the basis in this table and creates a new table.
+
+        It also returns useful objects to convert between the ungrouped
+        and the grouped basis tables.
+
+        Parameters
+        ----------
+        grouping :
+            Method to group point types. The options are:
+
+                - ``"point_type"``: No grouping.
+
+                - ``"basis_shape"``: Groups all point types that have the same basis shape.
+                  In a basis of spherical harmonics, "same basis shape" means that the number
+                  of basis functions for each angular momentum :math:`\ell` is the same. Note
+                  that the radial functions might differ, but they are not considered when
+                  grouping.
+
+                - ``"max"``: Groups all point types into a single group.
+
+        Returns
+        -------
+        new_table :
+            The new table with the grouped point types.
+        point_type_conversion :
+            Array of shape (n_point_types,) that maps the point types in the old table to the
+            point types in the new table. E.g. if one has the original point types they
+            can be converted to the new point types by doing:
+
+            .. code-block:: python
+                new_point_types = point_type_conversion[old_point_types]
+
+            To save memory, ``point_type_conversion`` is not a real array when
+            ``grouping == "point_type"``. It is just a dummy object that
+            returns the key when indexed: ``point_type_conversion[key] == key``.
+        edge_type_conversion :
+            Array of shape (n_edge_types,) that maps the edge types in the old table to the
+            edge types in the new table. E.g. if one has the original edge types they
+            can be converted to the new edge types by doing:
+
+            .. code-block:: python
+                new_edge_types = edge_type_conversion[old_edge_types]
+
+            To save memory, ``edge_type_conversion`` is not a real array when
+            ``grouping == "point_type"``. It is just a dummy object that
+            returns the key when indexed: ``edge_type_conversion[key] == key``.
+        filters :
+            This is None unless ``grouping == "max"``.
+
+            In that case, it is an array of shape (n_point_types, dim_new_basis).
+            For each original point type (first dimension), it contains a mask
+            to select the values of the new basis that correspond to it. E.g.:
+
+            .. code-block:: python
+                values = ... # some computation with the grouped basis (dim_new_basis, )
+                type0_values = values[filters[0]]
+
+        """
+        filters = None
+        if grouping == "point_type":
+            new_table = self
+
+            class A:
+                def __getitem__(self, key):
+                    return key
+
+            point_type_conversion = A()
+            edge_type_conversion = A()
+        elif grouping == "basis_shape":
+            # Get all basis sizes:
+            basis_sizes = np.zeros((len(self.basis), 5), dtype=int)
+            for i, point_type_basis in enumerate(self.basis):
+                for n, l, _ in point_type_basis.basis:
+                    basis_sizes[i, l] += n
+
+            # Get the unique basis sizes
+            unique_sizes, unique_indices, pseudo_types = np.unique(
+                basis_sizes, axis=0, return_index=True, return_inverse=True
+            )
+
+            # Create the new table with the unique basis sizes. Here we just
+            # take the first point type that has that basis size, but perhaps
+            # it would be better to create a new point type that represents
+            # that basis size (e.g. so that the name of the type is not misleading).
+            new_table = self.__class__([self.basis[i] for i in unique_indices])
+            point_type_conversion = pseudo_types
+
+            # Get conversions
+            old_edgetypes_to_new_point_types = point_type_conversion[
+                self.edge_type_to_point_types
+            ]
+            edge_type_conversion = new_table.edge_type[
+                old_edgetypes_to_new_point_types[:, 0],
+                old_edgetypes_to_new_point_types[:, 1],
+            ]
+            # For edge type conversions handle the case in which the edge type
+            # is negative.
+            edge_type_conversion = np.concatenate(
+                [edge_type_conversion, -1 * np.flip(edge_type_conversion[1:])]
+            )
+        elif grouping == "max":
+            # Get all basis sizes:
+            basis_sizes = np.zeros((len(self.basis), 5), dtype=int)
+            for i, point_type_basis in enumerate(self.basis):
+                for n, l, _ in point_type_basis.basis:
+                    basis_sizes[i, l] += n
+
+            # Maximum sizes:
+            max_sizes = basis_sizes.max(axis=0)
+
+            # Build the new point basis
+            max_basis = PointBasis(
+                "all",
+                R=self.maxR(),
+                basis=[(int(n), l, (-1) ** l) for l, n in enumerate(max_sizes)],
+                basis_convention=self.basis_convention,
+            )
+            # Create the new table with only one type.
+            new_table = self.__class__([max_basis])
+
+            # For each original point type, compute a mask that allows us to
+            # select the values of the new basis that correspond to that point type.
+            # (i.e. discard the values that are not present in that original point type).
+            missing_ls = max_sizes - basis_sizes
+            filters = np.zeros((len(self.basis), max_basis.basis_size), dtype=bool)
+            i = 0
+            for l, n in enumerate(max_sizes):
+                if n == 0:
+                    continue
+
+                for i_point, point_missing_ls in enumerate(missing_ls[:, l]):
+                    filters[i_point, i : i + (n - point_missing_ls) * (2 * l + 1)] = 1
+
+                i += (2 * l + 1) * n
+
+            # Point and edge type conversions, just map any type to 0.
+            point_type_conversion = np.zeros(len(self.basis), dtype=int)
+            edge_type_conversion = np.zeros(
+                len(self.edge_type_to_point_types), dtype=int
+            )
+        else:
+            raise NotImplementedError(f"Grouping by {grouping} is not implemented.")
+
+        return new_table, point_type_conversion, edge_type_conversion, filters
 
     def index_to_type(self, index: int) -> Union[str, int]:
         """Converts from the index of the point type to the type ID.

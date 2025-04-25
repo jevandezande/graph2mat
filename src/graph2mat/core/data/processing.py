@@ -942,10 +942,6 @@ class BasisMatrixDataBase(Generic[ArrayType]):
     edge_types :
         Shape (n_edges,).
         The type of each edge as defined by the basis table.
-    edge_type_nlabels :
-        Shape (n_edge_types,).
-        Edge labels are sorted by edge type. This array contains the number of
-        labels for each edge type.
     data_processor :
         Data processor associated to this data.
     metadata :
@@ -1037,11 +1033,6 @@ class BasisMatrixDataBase(Generic[ArrayType]):
     #: a `BasisTableWithEdges`.
     edge_types: ArrayType
 
-    #: Shape (n_edge_types,).
-    #: Edge labels are sorted by edge type. This array contains the number of
-    #: labels for each edge type.
-    edge_type_nlabels: ArrayType
-
     labels_point_filter: np.ndarray
     labels_edge_filter: np.ndarray
 
@@ -1061,7 +1052,6 @@ class BasisMatrixDataBase(Generic[ArrayType]):
         "edge_labels",
         "point_types",
         "edge_types",
-        "edge_type_nlabels",
     )
 
     def __init__(
@@ -1080,7 +1070,6 @@ class BasisMatrixDataBase(Generic[ArrayType]):
         labels_edge_filter: Optional[np.ndarray] = None,  # [n_edge_labels]
         point_types: Optional[np.ndarray] = None,  # [n_nodes]
         edge_types: Optional[np.ndarray] = None,  # [n_edges]
-        edge_type_nlabels: Optional[np.ndarray] = None,  # [n_edge_types]
         data_processor: MatrixDataProcessor = None,
         metadata: Optional[Dict[str, Any]] = None,
         already_basis: bool = False,
@@ -1099,7 +1088,6 @@ class BasisMatrixDataBase(Generic[ArrayType]):
             labels_edge_filter=labels_edge_filter,
             point_types=point_types,
             edge_types=edge_types,
-            edge_type_nlabels=edge_type_nlabels,
             data_processor=data_processor,
             metadata=metadata,
             already_basis=already_basis,
@@ -1123,7 +1111,6 @@ class BasisMatrixDataBase(Generic[ArrayType]):
         labels_edge_filter: Optional[np.ndarray] = None,  # [total_edge_elements]
         point_types: Optional[np.ndarray] = None,  # [n_nodes]
         edge_types: Optional[np.ndarray] = None,  # [n_edges]
-        edge_type_nlabels: Optional[np.ndarray] = None,  # [n_edge_types]
         data_processor: MatrixDataProcessor = None,
         metadata: Optional[Dict[str, Any]] = None,
         already_basis: bool = False,
@@ -1157,9 +1144,6 @@ class BasisMatrixDataBase(Generic[ArrayType]):
             "edge_labels": edge_labels,
             "point_types": point_types,
             "edge_types": edge_types,
-            "edge_type_nlabels": edge_type_nlabels.reshape(1, -1)
-            if edge_type_nlabels is not None
-            else None,
             "metadata": {
                 **(metadata or {}),
                 "data_processor": data_processor,
@@ -1375,11 +1359,6 @@ class BasisMatrixDataBase(Generic[ArrayType]):
             edge_index, sc_shifts, shifts.T, edge_types, supercell.isc_off, inplace=True
         )
 
-        # Count the number of labels that this matrix should have per edge type.
-        edge_type_nlabels = data_processor.get_nlabels_per_edge_type(
-            edge_types=edge_types
-        )
-
         # Then, get the supercell index of each interaction.
         neigh_isc = supercell.isc_off[sc_shifts[0], sc_shifts[1], sc_shifts[2]]
 
@@ -1400,7 +1379,6 @@ class BasisMatrixDataBase(Generic[ArrayType]):
             edge_labels=edge_labels if edge_labels is not None else None,
             point_types=indices,
             edge_types=edge_types,
-            edge_type_nlabels=edge_type_nlabels,
             data_processor=data_processor,
             metadata=config.metadata,
         )
@@ -1474,13 +1452,6 @@ class BasisMatrixDataBase(Generic[ArrayType]):
         for k in self._edge_attr_keys:
             if new_data.get(k) is not None:
                 new_data[k] = new_data[k][edge_mask]
-
-        # Set nlabels to 0 for edge types that are not present anymore
-        new_data["edge_type_nlabels"] = copy(new_data["edge_type_nlabels"])
-        u_edge_types = abs(new_data["edge_types"]).unique()
-        for i in range(new_data["edge_type_nlabels"].shape[1]):
-            if i not in u_edge_types:
-                new_data["edge_type_nlabels"][:, i] = 0
 
         return self.__class__(**new_data)
 

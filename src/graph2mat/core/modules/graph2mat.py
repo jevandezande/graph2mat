@@ -13,12 +13,14 @@ from typing import (
     Generic,
     Callable,
     Optional,
+    Literal,
 )
 from types import ModuleType
 
 from ..data import BasisMatrixData, BasisTableWithEdges
 from .matrixblock import MatrixBlock
 from ..data.basis import PointBasis
+from ._labels_resort import get_labels_resorting_array
 
 __all__ = ["Graph2Mat"]
 
@@ -47,9 +49,12 @@ class Graph2Mat(Generic[ArrayType]):
     .. math:: M_{ij} = all \space M_{\nu\mu} \space \text{where} \space \nu \in i,  \mu \in j
 
     The shape of the basis of points :math:`i` and :math:`j` determines then the shape of the block :math:`M_{ij}`.
-    Therefore, we need a different function to produce each kind of block. There are two clearly different
-    types of blocks by their origin, which might also obey different symmetries, and therefore we can classify
-    the blocks in two categories:
+    In other words, not all :math:`M_{ij}` blocks have the same shape, and/or the same equivariant behavior.
+    There are multiple ways to handle this complication, see the ``basis_grouping`` parameter to understand
+    the options that the user can choose.
+
+    Apart from the shape of the :math:`M_{ij}` blocks, there are two clearly different types of
+    blocks by their origin:
 
         - **Self interaction blocks** (:math:`f_n`): These are blocks that encode the interactions between basis functions of the
           same point. They correspond to nodes in the graph. These blocks are always square matrices. They are located at the diagonal of the matrix.
@@ -73,7 +78,7 @@ class Graph2Mat(Generic[ArrayType]):
 
         `Graph2Mat` itself is not a learnable module. If you are doing machine learning, the only
         learnable parameters will be in the node/edge operations :math:`f` and  the preprocessing
-        functions :math:`p` functions.
+        functions :math:`p`.
 
         `Graph2Mat` is just a skeleton so that you can quickly experiment with
         different functions.
@@ -93,6 +98,33 @@ class Graph2Mat(Generic[ArrayType]):
 
         Note that when using the function, each graph does not need to contain
         all the point types.
+    basis_grouping :
+        Each point type in the dataset has a different basis set. In practice, this means
+        that the matrix blocks :math:`M_{ij}` can have different shapes and/or different
+        equivariant behaviors. This poses a problem for the definition of the :math:`f_n`
+        and :math:`f_e` functions, which need to have a fixed shape output.
+
+        Let's say there are :math:`N` different point types in the dataset.
+
+        With the ``basis_grouping`` argument, the user can choose how to handle this
+        complication:
+
+            - ``"point_type"``: Each point type is treated separately. There are then
+              :math:`N` different operations for the self interactions and :math:`N^2`
+              different operations for the interactions between different point types.
+              This is the most trivial approach, but it can quickly result in a huge number
+              of operations.
+
+            - ``"basis_shape"``: Groups all point types that have the same basis shape.
+              In a basis of spherical harmonics, "same basis shape" means that the number
+              of basis functions for each angular momentum :math:`\ell` is the same. Note
+              that the radial functions might differ, but they are not considered when
+              grouping.
+
+            - ``"max"``: Groups all point types into a single group. This is done by having
+              a single operation that predicts enough channels to cover all the point types.
+              Then a mask is applied for each point type to end up with the correctly sized
+              blocks.
     preprocessing_nodes:
         A module that preprocesses the node features before passing them to the
         node block producing functions. This is :math:`p_n` in the sketch.
@@ -238,9 +270,27 @@ class Graph2Mat(Generic[ArrayType]):
     #: Dictionary of interaction functions (which compute edge blocks).
     interactions: Dict[Tuple[int, int], MatrixBlock]
 
+    #: The basis table used internally by graph2mat
+    graph2mat_table: List[PointBasis]
+    #: The mapping of types from the original basis to the graph2mat basis.
+    types_to_graph2mat: ArrayType
+    #: The mapping of edge types from the original basis to the graph2mat basis.
+    edge_types_to_graph2mat: ArrayType
+    #: If the ``basis_grouping`` is "max", this is a mask that is used to select
+    #: the values for the original basis from the new grouped basis. This has
+    #: shape (n_point_types, dim_new_basis).
+    basis_filters: Optional[ArrayType]
+    #: If the ``basis_grouping`` is "max", mask to select values from node operations
+    #: This has shape (n_point_types, dim_new_basis, dim_new_basis).
+    node_filters: Optional[ArrayType]
+    #: If the ``basis_grouping`` is "max", mask to select values from edge operations
+    #: This has shape (n_edge_types, dim_new_basis, dim_new_basis).
+    edge_filters: Optional[ArrayType]
+
     def __init__(
         self,
         unique_basis: Union[BasisTableWithEdges, Sequence[PointBasis]],
+        basis_grouping: Literal["point_type", "basis_shape", "max"] = "point_type",
         preprocessing_nodes: Optional[Type] = None,
         preprocessing_nodes_kwargs: dict = {},
         preprocessing_edges: Optional[Type] = None,
@@ -298,6 +348,9 @@ class Graph2Mat(Generic[ArrayType]):
             edge_operation is not None
         ), f"{self.__class__.__name__} needs an edge operation to be provided."
 
+        # Initialize the basis grouping
+        self._init_center_types(basis_grouping)
+
         # Build all the unique self-interaction functions (interactions of a point with itself)
         self_interactions = self._init_self_interactions(
             symmetry=self_blocks_symmetry,
@@ -315,10 +368,40 @@ class Graph2Mat(Generic[ArrayType]):
         )
         self.interactions = self._interactions_dict(interactions)
 
+    def _init_center_types(self, basis_grouping):
+        self.basis_grouping = basis_grouping
+
+        # Do the grouping
+        (
+            self.graph2mat_table,
+            self.types_to_graph2mat,
+            self.edge_types_to_graph2mat,
+            self.basis_filters,
+        ) = self.basis_table.group(self.basis_grouping)
+
+        # Prepare the filters to mask the output of the operations
+        # Currently self.basis_filters is only not None when
+        # basis_grouping is "max". Otherwise, we don't need to apply
+        # any mask because the
+        if self.basis_filters is not None:
+            original_edgetypes = self.basis_table.edge_type_to_point_types
+            self.node_filters = np.einsum(
+                "ia, ib ->iab", self.basis_filters, self.basis_filters
+            )
+
+            self.edge_filters = np.einsum(
+                "ia, ib ->iab",
+                self.basis_filters[original_edgetypes[:, 0]],
+                self.basis_filters[original_edgetypes[:, 1]],
+            )
+        else:
+            self.edge_filters = None
+            self.node_filters = None
+
     def _init_self_interactions(self, **kwargs) -> List[MatrixBlock]:
         self_interactions = []
 
-        for point_type_basis in self.basis_table.basis:
+        for point_type_basis in self.graph2mat_table.basis:
             if len(point_type_basis.basis) == 0:
                 # The point type has no basis functions
                 self_interactions.append(None)
@@ -335,7 +418,7 @@ class Graph2Mat(Generic[ArrayType]):
 
     def _init_interactions(self, **kwargs) -> Dict[Tuple[int, int], MatrixBlock]:
         point_type_combinations = itertools.combinations_with_replacement(
-            range(len(self.basis_table.basis)), 2
+            range(len(self.graph2mat_table.basis)), 2
         )
 
         interactions = {}
@@ -349,8 +432,8 @@ class Graph2Mat(Generic[ArrayType]):
                 perms.append((-edge_type, neigh_type, point_type))
 
             for signed_edge_type, point_i, point_j in perms:
-                i_basis = self.basis_table.basis[point_i]
-                j_basis = self.basis_table.basis[point_j]
+                i_basis = self.graph2mat_table.basis[point_i]
+                j_basis = self.graph2mat_table.basis[point_j]
 
                 if len(i_basis.basis) == 0 or len(j_basis.basis) == 0:
                     # One of the involved point types has no basis functions
@@ -412,7 +495,7 @@ class Graph2Mat(Generic[ArrayType]):
 
         s += "Node operations:"
         for i, x in enumerate(self.self_interactions):
-            point = self.basis_table.basis[i]
+            point = self.graph2mat_table.basis[i]
 
             if x is None:
                 s += f"\n ({point.type}) No basis functions."
@@ -429,8 +512,8 @@ class Graph2Mat(Generic[ArrayType]):
         for k, x in self.interactions.items():
             point_type, neigh_type, edge_type = map(int, k[1:-1].split(","))
 
-            point = self.basis_table.basis[point_type]
-            neigh = self.basis_table.basis[neigh_type]
+            point = self.graph2mat_table.basis[point_type]
+            neigh = self.graph2mat_table.basis[neigh_type]
 
             if x is None:
                 s += f"\n ({point.type}, {neigh.type}) No basis functions."
@@ -604,10 +687,8 @@ class Graph2Mat(Generic[ArrayType]):
 
         # Compute edge blocks using the interaction functions.
         edge_labels = self._forward_interactions(
-            data=data,
             edge_types=data["edge_types"],
             edge_index=data["edge_index"],
-            edge_type_nlabels=data["edge_type_nlabels"],
             node_kwargs=edge_operation_node_kwargs,
             edge_kwargs=edge_kwargs,
             global_kwargs=edge_operation_global_kwargs,
@@ -622,9 +703,9 @@ class Graph2Mat(Generic[ArrayType]):
         node_kwargs,
         global_kwargs,
     ) -> ArrayType:
-        # Allocate a list where we will store the outputs of all node blocks.
-        n_nodes = len(node_types)
-        node_labels = [None] * n_nodes
+        outputs = []
+
+        graph2mat_node_types = self.types_to_graph2mat[node_types]
 
         # Call each unique self interaction function with only the features
         # of nodes that correspond to that type.
@@ -633,7 +714,7 @@ class Graph2Mat(Generic[ArrayType]):
                 continue
 
             # Select the features for nodes of this type
-            mask = node_types == node_type
+            mask = graph2mat_node_types == node_type
 
             # Quick exit if there are no features of this type
             if not mask.any():
@@ -644,146 +725,32 @@ class Graph2Mat(Generic[ArrayType]):
             # If there are, compute the blocks.
             output = func(**filtered_kwargs, **global_kwargs)
             # Flatten the blocks
-            output = output.reshape(output.shape[0], -1)
+            outputs.append(output.ravel())
 
-            for i, individual_output in zip(mask.nonzero(), output):
-                node_labels[i] = individual_output
+        unsorted_node_labels = self.numpy.concatenate(outputs)
 
-        return self.numpy.concatenate(
-            [labels for labels in node_labels if labels is not None]
+        sort_indices = self._get_nodelabels_resort_index(
+            graph2mat_node_types, original_types=node_types
         )
 
-    def _forward_interactions_init_arrays_kwargs(self, edge_types_array):
-        return {}
-
-    def _forward_interactions(
-        self,
-        data: BasisMatrixData,
-        edge_types: ArrayType,
-        edge_index: ArrayType,
-        edge_type_nlabels: ArrayType,
-        node_kwargs: Dict[str, ArrayType] = {},
-        edge_kwargs: Dict[str, ArrayType] = {},
-        global_kwargs: dict = {},
-    ):
-        # THEN, COMPUTE EDGE BLOCKS
-        # Allocate space to store all the edge labels.
-        # Within the same structure, edges are grouped (and sorted) by edge type. The edge_type_nlabels tensor contains,
-        # for each structure, the number of edges of each type. We can accumulate these values to get a pointer to the
-        # beginning of each edge type in each structure.
-        init_arrays_kwargs = self._forward_interactions_init_arrays_kwargs(edge_types)
-        unique_edge_types = edge_type_nlabels.shape[1]
-        edge_type_ptrs = self.numpy.zeros(
-            edge_type_nlabels.shape[0] * edge_type_nlabels.shape[1] + 1,
-            dtype=self.numpy.int64,
-            **init_arrays_kwargs,
-        )
-        self.numpy.cumsum(edge_type_nlabels.ravel(), dim=0, out=edge_type_ptrs[1:])
-        # Then we can allocate a tensor to store all of them.
-        edge_labels = self.numpy.empty(
-            edge_type_ptrs[-1],
-            dtype=self.numpy.get_default_dtype(),
-            **init_arrays_kwargs,
-        )
-
-        edge_kwargs = {**edge_kwargs}
-        edge_requirements = getattr(self.edge_operation_cls, "_data_get_edge_args", ())
-        for key in edge_requirements:
-            edge_kwargs[key] = data[key]
-
-        # Call each unique interaction function with only the features
-        # of edges that correspond to that type.
-        for module_key, func in self.interactions.items():
-            if func is None:
-                # Case where one of the point types has no basis functions.
-                continue
-
-            # The key of the module is the a tuple (int, int, int) converted to a string.
-            point_type, neigh_type, edge_type = map(int, module_key[1:-1].split(","))
-
-            # Get a mask to select the edges that belong to this type.
-            mask = abs(edge_types) == abs(edge_type)
-            if not mask.any():
-                continue
-
-            # Then, for all features, select only the edges of this type.
-            filtered_edge_kwargs = {
-                key: value[mask] for key, value in edge_kwargs.items()
-            }
-            type_edge_index = edge_index[:, mask]
-
-            # Edges between the same points but in different directions are stored consecutively.
-            # So we can select every 2 features to get the same direction for all edges.
-            # For a block ij, we assume that the wanted direction is i -> j.
-            # We always pass first the direction that the function is supposed to evaluate.
-            if edge_type > 0:
-                i_edges = slice(0, None, 2)
-                j_edges = slice(1, None, 2)
-            else:
-                i_edges = slice(1, None, 2)
-                j_edges = slice(0, None, 2)
-
-            # Create the tuples of edge features. Each tuple contains the two directions of the
-            # edge. The first item contains the "forward" direction, the second the "reverse" direction.
-            filtered_edge_kwargs = {
-                key: (value[i_edges], value[j_edges])
-                for key, value in filtered_edge_kwargs.items()
-            }
-
-            # For the node arguments we need to filter them and create pairs, such that a tuple
-            # (sender, receiver) is built for each node argument.
-            filtered_node_kwargs = {
-                key: (
-                    value[type_edge_index[0, i_edges]],
-                    value[type_edge_index[1, i_edges]],
-                )
-                for key, value in node_kwargs.items()
-            }
-
-            # Compute the outputs.
-            # The output will be of shape [n_edges, i_basis_size, j_basis_size]. That is, one
-            # matrix block per edge, where the shape of the block is determined by the edge type.
-            output = func(
-                **filtered_node_kwargs, **filtered_edge_kwargs, **global_kwargs
-            )
-
-            # Since each edge type has a different block shape, we need to flatten the blocks (and even
-            # the n_edges dimension) to put them all in a single array.
-            output = output.ravel()
-
-            # Here, we fill the edge labels array with the output at the appropiate positions (as determined
-            # when bulding the pointers before the compute loop).
-            els = 0
-            for start, end in zip(
-                edge_type_ptrs[edge_type::unique_edge_types],
-                edge_type_ptrs[edge_type + 1 :: unique_edge_types],
-            ):
-                next_els = els + end - start
-                edge_labels[start:end] = output[els:next_els]
-                els = next_els
-
-        return edge_labels
+        return unsorted_node_labels[sort_indices]
 
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
-    def _forward_interactions_with_resorting(
+    def _forward_interactions(
         self,
         edge_types: ArrayType,
         edge_index: ArrayType,
-        edge_type_nlabels: ArrayType,
         node_kwargs: Dict[str, ArrayType] = {},
         edge_kwargs: Dict[str, ArrayType] = {},
         global_kwargs: dict = {},
-    ):
-        """Experimental interactions forward by building a resorting array with cython. (NOT USED FOR NOW)
-
-        The resorting indices don't need gradients, so we can just compute them with cython.
-
-        For the tests that I have done it doesn't show a speedup (i.e. the resorting is not a bottleneck)
-        """
+    ) -> ArrayType:
+        """Computation of edge blocks."""
 
         outputs = []
+
+        graph2mat_edge_types = self.edge_types_to_graph2mat[edge_types]
 
         # Call each unique interaction function with only the features
         # of edges that correspond to that type.
@@ -796,7 +763,7 @@ class Graph2Mat(Generic[ArrayType]):
             point_type, neigh_type, edge_type = map(int, module_key[1:-1].split(","))
 
             # Get a mask to select the edges that belong to this type.
-            mask = abs(edge_types) == abs(edge_type)
+            mask = abs(graph2mat_edge_types) == abs(edge_type)
             if not mask.any():
                 continue
 
@@ -810,12 +777,12 @@ class Graph2Mat(Generic[ArrayType]):
             # So we can select every 2 features to get the same direction for all edges.
             # For a block ij, we assume that the wanted direction is i -> j.
             # We always pass first the direction that the function is supposed to evaluate.
-            if edge_type > 0:
+            if point_type == neigh_type:
                 i_edges = slice(0, None, 2)
                 j_edges = slice(1, None, 2)
             else:
-                i_edges = slice(1, None, 2)
-                j_edges = slice(0, None, 2)
+                i_edges = graph2mat_edge_types[mask] == edge_type
+                j_edges = ~i_edges
 
             # Create the tuples of edge features. Each tuple contains the two directions of the
             # edge. The first item contains the "forward" direction, the second the "reverse" direction.
@@ -847,21 +814,122 @@ class Graph2Mat(Generic[ArrayType]):
 
             outputs.append(output)
 
+        # Concatenate all the outputs.
         unsorted_edge_labels = self.numpy.concatenate(outputs)
 
-        sort_indices = self._get_interactions_resort_index(edge_types)
+        # Get the indices that will resort the edge outputs to produce
+        # the target. (i.e. go back to the order the edges came in).
+        sort_indices = self._get_edgelabels_resort_index(
+            graph2mat_edge_types, original_types=edge_types
+        )
 
+        # Do the resorting and return the result.
         return unsorted_edge_labels[sort_indices]
 
-    def _get_interactions_resort_index(self, edge_types, **kwargs):
-        """Experimental resorting array building with cython. NOT USED FOR NOW"""
-        from ._labels_resort import get_edgelabels_resorting_array
+    def _get_nodelabels_resort_index(
+        self, types: np.ndarray, original_types: ArrayType, **kwargs
+    ) -> np.ndarray:
+        """Compute the indices to resort node labels.
 
-        edge_types = edge_types[::2].numpy(force=True)
+        Parameters
+        ----------
+        types :
+            The node types in the basis of this module.
+        original_types :
+            The node types in the original (ungrouped) basis.
+        kwargs :
+            Additional arguments passed directly to ``_get_labels_resort_index``.
 
-        sizes = self.basis_table.edge_block_size
+        See Also
+        --------
+        _get_labels_resort_index
+            The function that does the actual computation of the resorting indices.
+            This function is shared between node and edge labels.
+        """
+        return self._get_labels_resort_index(
+            types=types,
+            original_types=original_types,
+            shapes=self.graph2mat_table.point_block_shape,
+            filters=self.node_filters,
+            # original_sizes=self.basis_table.point_block_size,
+            transpose_neg=False,
+            **kwargs,
+        )
 
-        indices = get_edgelabels_resorting_array(edge_types.astype(int), sizes)
+    def _get_edgelabels_resort_index(
+        self, types: np.ndarray, original_types: ArrayType, **kwargs
+    ) -> np.ndarray:
+        """Compute the indices to resort edge labels.
 
-        indices = self.numpy.from_numpy(indices, **kwargs)
+        Parameters
+        ----------
+        types :
+            The edge types in the basis of this module.
+        original_types :
+            The edge types in the original (ungrouped) basis.
+        kwargs :
+            Additional arguments passed directly to ``_get_labels_resort_index``.
+
+        See Also
+        --------
+        _get_labels_resort_index
+            The function that does the actual computation of the resorting indices.
+            This function is shared between node and edge labels.
+        """
+        if self.symmetric:
+            types = types[::2]
+            original_types = original_types[::2]
+
+        return self._get_labels_resort_index(
+            types=types,
+            original_types=original_types,
+            shapes=self.graph2mat_table.edge_block_shape,
+            filters=self.edge_filters,
+            transpose_neg=self.symmetric and self.basis_grouping == "basis_shape",
+            **kwargs,
+        )
+
+    def _get_labels_resort_index(
+        self,
+        types: np.ndarray,
+        shapes: np.ndarray,
+        original_types: ArrayType,
+        filters: ArrayType,
+        transpose_neg: bool = False,
+        **kwargs,
+    ) -> np.ndarray:
+        """Compute the indices to resort the labels
+
+        The edge/node blocks are computed according to the basis grouping and then
+        concatenated. They need to be reordered to match the original order of
+        the edges as they were inputed to Graph2Mat.
+
+        This function takes care of computing the reordering indices.
+
+        Parameters
+        ----------
+        types :
+            The block types in the basis of this module.
+        shapes :
+            The shape of the blocks for each type.
+        original_types :
+            The block types in the original (ungrouped) basis.
+        filters :
+            Only used if ``basis_grouping="max"``. Masks that select the
+            values for the original basis from the blocks generated in the
+            new grouped basis.
+        transpose_neg :
+            Whether to transpose the generated blocks when the type is negative.
+            This is only used when ``basis_grouping != "max"``.
+        """
+        if self.basis_grouping == "max":
+            return filters[original_types].ravel()
+        else:
+            indices = get_labels_resorting_array(
+                types,
+                shapes=shapes.astype(types.dtype),
+                transpose_neg=transpose_neg,
+                **kwargs,
+            )
+
         return indices
