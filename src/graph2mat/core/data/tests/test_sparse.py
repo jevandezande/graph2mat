@@ -24,7 +24,10 @@ def test_csr_to_basismatrix_simple(density_matrix):
     density_matrix[density_matrix.orbitals[0], 0] = 3
 
     basis_matrix = csr_to_basismatrix(
-        density_matrix._csr, density_matrix.atoms, nsc=density_matrix.nsc
+        density_matrix._csr,
+        density_matrix.atoms,
+        nsc=density_matrix.nsc,
+        fill_value=np.nan,
     )
 
     for (i_at, j_at), val in zip([(0, 0), (0, 1), (1, 0)], [1, 2, 3]):
@@ -43,7 +46,10 @@ def test_block_dict_to_csr_simple(density_matrix):
     density_matrix[first_orb_atom1, 0] = 3
 
     basis_matrix = csr_to_basismatrix(
-        density_matrix._csr, density_matrix.atoms, nsc=density_matrix.nsc
+        density_matrix._csr,
+        density_matrix.atoms,
+        nsc=density_matrix.nsc,
+        fill_value=np.nan,
     )
 
     for (i_at, j_at), val in zip([(0, 0), (0, 1), (1, 0)], [1, 2, 3]):
