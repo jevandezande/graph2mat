@@ -18,7 +18,7 @@ _change_of_basis_conventions = {
 for k, matrix in _change_of_basis_conventions.items():
     _change_of_basis_conventions[k] = (matrix, np.linalg.inv(matrix))
 
-BasisConvention = Literal["cartesian", "spherical", "siesta_spherical"]
+BasisConvention = Literal["cartesian", "spherical", "siesta_spherical", "qe_spherical"]
 
 
 def get_atom_basis(atom: sisl.Atom):
