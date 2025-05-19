@@ -12,12 +12,13 @@ _change_of_basis_conventions = {
     "cartesian": np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float),
     "spherical": np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]], dtype=float),
     "siesta_spherical": np.array([[0, -1, 0], [0, 0, 1], [-1, 0, 0]], dtype=float),
+    "qe_spherical": np.array([[0, 0, 1], [-1, 0, 0], [0, -1, 0]], dtype=float),
 }
 
 for k, matrix in _change_of_basis_conventions.items():
     _change_of_basis_conventions[k] = (matrix, np.linalg.inv(matrix))
 
-BasisConvention = Literal["cartesian", "spherical", "siesta_spherical"]
+BasisConvention = Literal["cartesian", "spherical", "siesta_spherical", "qe_spherical"]
 
 
 def get_atom_basis(atom: sisl.Atom):
