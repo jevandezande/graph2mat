@@ -1,5 +1,5 @@
 Python API tutorials
--------------------
+--------------------
 
 Are you interested in **developing your own thing**, or just a curious person
 that likes to explore? This section is for you!

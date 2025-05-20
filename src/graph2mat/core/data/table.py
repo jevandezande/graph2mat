@@ -278,6 +278,7 @@ class BasisTableWithEdges:
             can be converted to the new point types by doing:
 
             .. code-block:: python
+
                 new_point_types = point_type_conversion[old_point_types]
 
             To save memory, ``point_type_conversion`` is not a real array when
@@ -289,6 +290,7 @@ class BasisTableWithEdges:
             can be converted to the new edge types by doing:
 
             .. code-block:: python
+
                 new_edge_types = edge_type_conversion[old_edge_types]
 
             To save memory, ``edge_type_conversion`` is not a real array when
@@ -302,6 +304,7 @@ class BasisTableWithEdges:
             to select the values of the new basis that correspond to it. E.g.:
 
             .. code-block:: python
+
                 values = ... # some computation with the grouped basis (dim_new_basis, )
                 type0_values = values[filters[0]]
 

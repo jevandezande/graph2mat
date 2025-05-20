@@ -129,6 +129,7 @@ class PointBasis:
     ----------
 
     .. code-block:: python
+
         from graph2mat import PointBasis
 
         # Let's create a basis with 3 l=0 functions and 2 sets of l=1 functions.

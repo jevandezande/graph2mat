@@ -66,7 +66,7 @@ aid with reshaping model outputs or disentangling batches of data, for example.
     AtomicTableWithEdges
 
 Data containers
-********
+***************
 
 These classes are used to store the data of your dataset.
 
@@ -251,17 +251,15 @@ framework so that you can start using ``lightning`` right away with little to no
 **Models**
 
 .. autosummary::
-
     :toctree: api-generated/
     :template: autosummary/custom-class-template.rst
 
     LitBasisMatrixModel
-    LitMACEMatrixModel
+    models.mace.LitMACEMatrixModel
 
 **Data modules**
 
 .. autosummary::
-
     :toctree: api-generated/
     :template: autosummary/custom-class-template.rst
 
@@ -270,7 +268,6 @@ framework so that you can start using ``lightning`` right away with little to no
 **Callbacks**
 
 .. autosummary::
-
     :toctree: api-generated/
     :template: autosummary/custom-class-template.rst
 
