@@ -51,4 +51,32 @@ We are very open to suggestions, contributions, discussions...
 - If you have questions or want do discuss an idea, please [start a discussion](https://github.com/BIG-MAP/graph2mat/discussions)
 - If you have a feature suggestion or bug report, please [open an issue](https://github.com/BIG-MAP/graph2mat/issues)
 
-We look forward to your contributions!
+We are looking forward to your contributions!
+
+The `graph2mat` package was originally created by Peter Bjørn Jorgensen (@peterbjorgensen) and Pol Febrer (@pfebrer) in the frame of a collaboration to machine learn density matrices. 
+
+Since then, the following users have contributed to the code:
+
+<a href="https://github.com/zerothi/sisl/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=BIG-MAP/graph2mat" />
+</a>
+
+Citation
+--------
+
+If you use `graph2mat` for one of your works, please cite our original paper:
+
+```
+@article{febrer2025graph2mat,
+  title={Graph2Mat: universal graph to matrix conversion for electron density prediction},
+  author={Febrer, Pol and J{\o}rgensen, Peter Bj{\o}rn and Pruneda, Miguel and Garc{\'\i}a, Alberto and Ordej{\'o}n, Pablo and Bhowmik, Arghya},
+  journal={Machine Learning: Science and Technology},
+  volume={6},
+  number={2},
+  pages={025013},
+  year={2025},
+  publisher={IOP Publishing}
+}
+```
+
+We'll be very happy to see what you have done with it :)
