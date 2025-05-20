@@ -57,7 +57,7 @@ The `graph2mat` package was originally created by Peter Bjørn Jorgensen (@peter
 
 Since then, the following users have contributed to the code:
 
-<a href="https://github.com/zerothi/sisl/graphs/contributors">
+<a href="https://github.com/BIG-MAP/graph2mat/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=BIG-MAP/graph2mat" />
 </a>
 
