@@ -211,3 +211,69 @@ there are implementations of blocks that you might use within your model.
 +----------------------------+----------------------+
 | `E3nnSimpleEdgeBlock`      | Edge block readout   |
 +----------------------------+----------------------+
+
+Tools
+-----
+
+The ``graph2mat.tools`` module contains code that it is not per se graph2mat
+functionality, but can be very useful within its day to day use.
+
+Lightning
+*********
+
+.. currentmodule:: graph2mat.tools.lightning
+
+These are tools for pytorch lightning. They can be imported like:
+
+.. code-block:: python
+
+    from graph2mat.tools.lightning import X
+
+    # or
+
+    import graph2mat.tools.lightning
+
+    graph2mat.tools.lightning.X
+
+.. note::
+
+    Apart from the tools listed below, which can be used from python, we also provide a full
+    pytorch lightning Command Line Interface (CLI) for those who want to train models from the
+    command line. See the :doc:`CLI tutorials <../tutorials/cli/index>` for more information.
+
+`Pytorch Lightning <https://lightning.ai/docs/pytorch/stable/>`_ is a very nice library to
+facilitate the training of models with ``torch``. Their main training flow is based around
+the ``Trainer`` class. We recommend going through their documentation to understand how
+things are meant to be used. In short, the trainer needs a model, a data module and
+can use callbacks. We provide these three pieces specifically tailored for the ``graph2mat``
+framework so that you can start using ``lightning`` right away with little to no friction.
+
+**Models**
+
+.. autosummary::
+
+    :toctree: api-generated/
+    :template: autosummary/custom-class-template.rst
+
+    LitBasisMatrixModel
+    LitMACEMatrixModel
+
+**Data modules**
+
+.. autosummary::
+
+    :toctree: api-generated/
+    :template: autosummary/custom-class-template.rst
+
+    MatrixDataModule
+
+**Callbacks**
+
+.. autosummary::
+
+    :toctree: api-generated/
+    :template: autosummary/custom-class-template.rst
+
+    MatrixWriter
+    SamplewiseMetricsLogger
+    PlotMatrixError

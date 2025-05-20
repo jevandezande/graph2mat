@@ -577,7 +577,7 @@ def create_extrapolation_app(
             c.matrix = m
 
             m = BasisMatrixData.from_config(c, this_series.processor)
-            m = m.to_sparse_orbital_matrix()
+            m = m.convert_to(this_series.processor.default_out_format)
 
             if this_series.last_matrix_ref is not None:
                 m = m + this_series.last_matrix_ref

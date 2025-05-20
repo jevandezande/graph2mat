@@ -232,6 +232,7 @@ intersphinx_mapping = {
     "plotly": ("https://plotly.com/python-api-reference/", None),
     "torch": ("https://pytorch.org/docs/stable/", None),
     "e3nn": ("https://docs.e3nn.org/en/stable/", None),
+    "pytorch_lightning": ("https://lightning.ai/docs/pytorch/stable/", None),
 }
 
 # Write the documentation for available conversions.

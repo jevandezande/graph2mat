@@ -37,9 +37,24 @@ class MatrixWriter(Callback):
             "predict",
         ],  # I don't know why, but Sequence[str] breaks the lightning CLI
     ):
-        super().__init__()
+        """Callback to write produced matrices to disk.
 
-        splits = ["train", "val", "test", "predict"]
+        Parameters
+        ----------
+        output_file :
+            Path to the output file.
+
+            The structures might contain as metadata the path from which they were read.
+            In that case, if ``output_file`` is a relative path, it will be relative to
+            the directory from which the structure was read.
+
+            If ``output_file`` contains the string "$name$", it will be replaced
+            by the name of the directory from which the structure was read.
+        splits :
+            List of splits for which to write the matrices. Can be any combination of
+            "train", "val", "test", "predict".
+        """
+        super().__init__()
 
         if splits in ["train", "val", "test", "predict"]:
             splits = [splits]
@@ -68,10 +83,12 @@ class MatrixWriter(Callback):
 
         # Loop through structures in the batch
         for matrix_data in matrix_iter:
-            sparse_orbital_matrix = matrix_data.to_sparse_orbital_matrix()
+            sparse_orbital_matrix = matrix_data.convert_to(
+                data_processor.default_out_format
+            )
 
             # Get the path from which this structure was read.
-            path = matrix_data.metadata["path"]
+            path = matrix_data.metadata.get("path", Path())
             out_file = Path(self.output_file.replace("$name$", path.parent.name))
             if not self.out_is_absolute:
                 out_file = path.parent / out_file
@@ -151,8 +168,10 @@ class SamplewiseMetricsLogger(Callback):
         elif isinstance(splits, str):
             raise ValueError(f"Invalid value for splits: {splits}")
 
+        self.fail_ok = False
         if metrics is None:
             metrics = OrbitalMatrixMetric.__subclasses__()
+            self.fail_ok = True
 
         self.splits = splits
         self.metrics = [metric() for metric in metrics]
@@ -218,26 +237,36 @@ class SamplewiseMetricsLogger(Callback):
         basis_table: AtomicTableWithEdges = trainer.datamodule.basis_table
 
         # Compute all the metrics
-        metrics = [
-            metric(
-                nodes_pred=outputs["node_labels"],
-                nodes_ref=batch.point_labels,
-                edges_pred=outputs["edge_labels"],
-                edges_ref=batch.edge_labels,
-                batch=batch,
-                basis_table=basis_table,
-                config_resolved=True,
-                symmetric_matrix=trainer.datamodule.symmetric_matrix,
-            )[0]
-            for metric in self.metrics
-        ]
+        metrics = []
+        for metric in self.metrics:
+            try:
+                metrics.append(
+                    metric(
+                        nodes_pred=outputs["node_labels"],
+                        nodes_ref=batch.point_labels,
+                        edges_pred=outputs["edge_labels"],
+                        edges_ref=batch.edge_labels,
+                        batch=batch,
+                        basis_table=basis_table,
+                        config_resolved=True,
+                        symmetric_matrix=trainer.datamodule.symmetric_matrix,
+                    )[0]
+                )
+            except Exception as e:
+                if self.fail_ok:
+                    metrics.append(np.full(len(batch), np.nan))
+                else:
+                    raise e
 
         # Concatenate them (if we wish to accumulate them) TODO
 
         # Get the index of the current epoch
         current_epoch = trainer.current_epoch
         # And the names of the samples that we are going to log
-        sample_names = [Path(path).parent.name for path in batch.metadata["path"]]
+        if "path" in batch.metadata:
+            sample_names = [Path(path).parent.name for path in batch.metadata["path"]]
+        else:
+            sample_names = [f"batch{batch_idx}_{i}" for i in range(len(batch))]
 
         # Create an iterator that will return the data to be written to the CSV file for each row.
         # That is, first the sample name, then the metrics, and finally the split and the epoch index.
@@ -273,8 +302,24 @@ class SamplewiseMetricsLogger(Callback):
 
 
 class PlotMatrixError(Callback):
-    """Add plots of MAE and RMSE for each entry of matrix.
-    Does only work if the matrix is the same format for every datapoint as in molecular dynamics data
+    """Callback to create plots of MAE and RMSE for each entry of matrix.
+
+    It only works if the matrix for all structures has always exactly the
+    same shape. This happens for example if the structures are all snapshots
+    from a molecular dynamics simulation.
+
+    This callback is then useful to visualize how the errors are distributed
+    within the matrix.
+
+    Parameters
+    ----------
+    split :
+        Split for which to plot the errors. If None, the callback will be used for both
+        validation and test splits.
+    show :
+        Whether to show the plots or not.
+    store_in_logger :
+        Whether to store the plots in the logger or not.
     """
 
     def __init__(
@@ -319,7 +364,7 @@ class PlotMatrixError(Callback):
 
         # Get the values for the node blocks and the pointer to the start of each block.
         node_labels = outputs["node_labels"].numpy(force=True)
-        node_labels_ptr = basis_table.atom_block_pointer(point_types)
+        node_labels_ptr = basis_table.point_block_pointer(point_types)
 
         # Get the values for the edge blocks and the pointer to the start of each block.
         edge_index = batch.edge_index.numpy(force=True)
@@ -400,9 +445,11 @@ class PlotMatrixError(Callback):
         for i, (label, node_error, edge_error) in enumerate(
             zip(labels, node_errors, edge_errors)
         ):
+            unique_atoms = basis_table.get_sisl_atoms()
+
             geometry = sisl.Geometry(
                 self.positions,
-                atoms=[basis_table.atoms[at_type] for at_type in self.point_types],
+                atoms=[unique_atoms[at_type] for at_type in self.point_types],
                 lattice=self.cell,
             )
 

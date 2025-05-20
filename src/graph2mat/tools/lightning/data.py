@@ -163,15 +163,13 @@ class MatrixDataModule(pl.LightningDataModule):
 
         # Set the paths for each split
         for split in ["train", "val", "test", "predict"]:
-            glob_path = getattr(self, "%s_runs" % split)
-            # Use the glob paths if given
-            if glob_path is not None:
-                runs = Path(root).glob(glob_path)
+            runs = getattr(self, "%s_runs" % split)
+            if isinstance(runs, str):
+                # This is a glob pattern
+                runs = Path(root).glob(runs)
             # Else use the json file
-            elif split in runs_dict:
+            elif runs is None and split in runs_dict:
                 runs = [Path(root) / p for p in runs_dict[split]]
-            else:
-                runs = None
 
             if runs is not None:
                 # Contruct the dataset
@@ -226,8 +224,6 @@ class MatrixDataModule(pl.LightningDataModule):
             self.train_dataset = RotatingPoolData(
                 self.train_dataset, self.rotating_pool_size
             )
-
-        
 
     def train_dataloader(self):
         assert (

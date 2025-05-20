@@ -24,6 +24,8 @@ from graph2mat.tools.lightning import LitBasisMatrixModel
 
 
 class LitMACEMatrixModel(LitBasisMatrixModel):
+    """Wrapper to use MACEMatrix in pytorch_lightning."""
+
     model: MACE
 
     def __init__(
