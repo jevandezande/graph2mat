@@ -2,23 +2,45 @@
 
 from typing import Union, Literal, Tuple, Sequence
 from numbers import Number
+import itertools
 
 import dataclasses
 
 import numpy as np
 import sisl
 
-_change_of_basis_conventions = {
-    "cartesian": np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float),
-    "spherical": np.array([[0, 1, 0], [0, 0, 1], [1, 0, 0]], dtype=float),
-    "siesta_spherical": np.array([[0, -1, 0], [0, 0, 1], [-1, 0, 0]], dtype=float),
-    "qe_spherical": np.array([[0, 0, 1], [-1, 0, 0], [0, -1, 0]], dtype=float),
-}
+_basis_orderings = list(itertools.permutations([0, 1, 2], 3))
+_basis_signs = list(itertools.product([-1, 1], repeat=3))
+_x_y_z = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+
+_change_of_basis_conventions: dict[str, tuple[np.ndarray, np.ndarray]] = {}
+
+# Add all possible (-)[xyz](-)[xyz](-)[xyz] basis conventions.
+for ordering in _basis_orderings:
+    ordered_basis = _x_y_z[list(ordering)]
+    for signs in _basis_signs:
+        name = "".join(str(sign)[:-1] + "xyz"[i] for i, sign in zip(ordering, signs))
+
+        # Multiply the rows of ordered_basis by the signs.
+        # We convert to float *after* the multiplication to avoid having "-0." values.
+        _change_of_basis_conventions[name] = (ordered_basis.T * signs).T.astype(float)
 
 for k, matrix in _change_of_basis_conventions.items():
     _change_of_basis_conventions[k] = (matrix, np.linalg.inv(matrix))
 
-BasisConvention = Literal["cartesian", "spherical", "siesta_spherical", "qe_spherical"]
+# Some aliases to facilitate life for users.
+_change_of_basis_conventions.update(
+    {
+        "cartesian": _change_of_basis_conventions["xyz"],
+        "spherical": _change_of_basis_conventions["yzx"],
+        "siesta_spherical": _change_of_basis_conventions["-yz-x"],
+        "qe_spherical": _change_of_basis_conventions["z-x-y"],
+    }
+)
+
+BasisConvention = Union[
+    str, Literal["cartesian", "spherical", "siesta_spherical", "qe_spherical"]
+]
 
 
 def get_atom_basis(atom: sisl.Atom):
@@ -100,20 +122,8 @@ class PointBasis:
 
     Parameters
     ----------
-    type : Union[str, int]
+    type :
         The type ID, e.g. some meaningful name or a number.
-    basis_convention : BasisConvention
-        The spherical harmonics convention used for the basis.
-    basis:
-        Specification of the basis set that the point type has.
-        It can be a list of specifications, then each item in the list can
-        be the number of sets of functions for a given l (determined
-        by the position of the item in the list), or a tuple specifying
-        (n_sets, l, parity).
-
-        It can also be a string representing the irreps of the basis in
-        the `e3nn` format. E.g. "3x0e+2x1o" would mean 3 `l=0` and 2 `l=1`
-        sets.
     R : Union[float, np.ndarray]
         The reach of the basis.
         If a float, the same reach is used for all functions.
@@ -124,6 +134,22 @@ class PointBasis:
 
         The reach of the functions will determine if the point interacts with
         other points.
+    basis:
+        Specification of the basis set that the point type has.
+        It can be a list of specifications, then each item in the list can
+        be the number of sets of functions for a given l (determined
+        by the position of the item in the list), or a tuple specifying
+        (n_sets, l, parity).
+
+        It can also be a string representing the irreps of the basis in
+        the `e3nn` format. E.g. "3x0e+2x1o" would mean 3 `l=0` and 2 `l=1`
+        sets.
+    basis_convention :
+        The convention used for the basis. It can be any combination of ``"xyz"``
+        with optional minus signs, e.g. ``"xyz"``, ``"-yz-x"``, ``"z-x-y"``.
+        You can also use the aliases that we provide, such as ``"cartesian"`` or
+        ``"spherical"``.
+
 
     Examples
     ----------
