@@ -2,7 +2,7 @@
 requires-python = ">=3.9"
 
 name = "graph2mat"
-version = "0.0.7"
+version = "0.0.8"
 description = "Utility package to work with equivariant matrices and graphs."
 readme = "README.md"
 license = {text = "MIT"}
@@ -56,6 +56,7 @@ server = [
     "pyyaml",
     "fastapi",
     "uvicorn",
+    "python-multipart",
     "jinja2"
 ]
 
@@ -66,7 +67,8 @@ analysis = [
 
 lightning = [
     "pytorch-lightning",
-    "jsonargparse[signatures]"
+    "jsonargparse[signatures]",
+    "tensorboard"
 ]
 
 siesta = [
@@ -79,13 +81,13 @@ torch = [
 ]
 
 e3nn = [
-    "torch",
+    "torch<=2.5",
     "torch_geometric",
     "e3nn"
 ]
 
 mace = [
-    "torch",
+    "torch<=2.5",
     "torch_geometric",
     "mace_torch"
 ]
@@ -96,11 +98,13 @@ tools = [
     "uvicorn",
     "python-multipart",
     "plotly",
+    "kaleido",
     "pandas",
     "pytorch-lightning",
     "jsonargparse[signatures]",
     "jinja2",
-    "mace_torch"
+    "mace_torch",
+    "tensorboard"
 ]
 
 docs = [

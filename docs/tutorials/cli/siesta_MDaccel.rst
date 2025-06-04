@@ -27,7 +27,7 @@ complex and relevant use cases.
         conda install -c conda-forge siesta
 
     It also assumes that you have installed ``graph2mat`` with
-    all its optional dependencies, which can be done with ``pip install graph2mat[tools]``.
+    all its optional dependencies, which can be done with ``pip install graph2mat[tools,mace]``.
 
 Generating a dataset
 --------------------
@@ -241,7 +241,7 @@ This is what our minimal yaml file will look like:
         # Number of times the training process goes over the whole dataset (one epoch)
         # We could set it to something very high if we want to stop it manually when we
         # are satisfied.
-        max_epochs: 500
+        max_epochs: 200
 
 Are you ready for your first matrix training? You can now save these contents into a file called ``config.yaml`` and start the training process with:
 
@@ -302,7 +302,7 @@ By clicking `here <http://localhost:6006/?pinnedCards=%5B%7B%22plugin%22%3A%22sc
 you will get the mean and max absolute errors from nodes and edges pinned.
 You will probably also want to set the log scale by clicking on the right-top corner menu.
 
-If you are running 500 epochs on CPU, it should finish after less than 10 minutes.
+If you are running 200 epochs on CPU, it should finish after less than 5 minutes.
 The mean errors will probably be somewhere around 0.001, and the max errors around 0.01.
 Errors will probably still be decreasing, which means that if you continued training you
 would get a better model. But this is good enough for us to continue the tutorial.
@@ -381,10 +381,10 @@ This is possible by using the ``predict`` subcommand and the ``MatrixWriter`` ca
 
     graph2mat models mace main predict \
        --ckpt_path lightning_logs/my_first_model/version_0/checkpoints/best-2040.ckpt  \
-       --data.predict_structs ../dataset/MD_steps/*/RUN.fdf \
+       --data.predict_structs "../dataset/MD_steps/*/RUN.fdf" \
        --trainer.callbacks+ MatrixWriter --trainer.callbacks.output_file ML_prediction.DM
 
-This will write the predictions to each directory of the ``MD_datataset`` folder.
+This will write the predictions to each directory of the ``dataset`` folder.
 With this, you can do whatever you want. For example, you could **run a SIESTA calculation
 using the prediction as an initial DM**, do some **further analysis of the errors** or **use it
 as the true density matrix** of the system.

@@ -485,7 +485,7 @@ class PlotMatrixError(Callback):
             ).update_layout(title=label)
 
             if self.show:
-                fig.show()
+                fig.show("browser")
             if self.store_in_logger:
                 import PIL.Image
 
