@@ -527,8 +527,16 @@ performance is to run:
 
     graph2mat siesta md analyze RUN.out
 
-It will open a table in the browser summarizing the performance of the SCF cycles. You can also
-save the results to a csv file with the ``--save`` option.
+It will open a table in the browser summarizing the performance of the SCF cycles.
+
+.. note::
+
+   If the browser is not able to display the table, save it to a file and then open the
+   file with a browser.
+
+   ``graph2mat siesta md analyze RUN.out --save results.html``
+
+You can also save the results to a csv file with the ``--save`` option.
 
 .. code-block:: bash
 

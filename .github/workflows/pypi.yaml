@@ -86,57 +86,57 @@ jobs:
           path: dist/*.tar.gz
 
   # Upload to testpypi
-  upload_testpypi:
-    needs: [build_sdist, build_wheels]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/p/graph2mat
-    permissions:
-      id-token: write
-    name: Publish package to TestPyPI
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: True
+  # upload_testpypi:
+  #   needs: [build_sdist, build_wheels]
+  #   if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags')
+  #   environment:
+  #     name: testpypi
+  #     url: https://test.pypi.org/p/graph2mat
+  #   permissions:
+  #     id-token: write
+  #   name: Publish package to TestPyPI
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         path: dist
+  #         merge-multiple: True
 
-      - uses: pypa/gh-action-pypi-publish@v1.8.11
-        with:
-          repository-url: https://test.pypi.org/legacy/
+  #     - uses: pypa/gh-action-pypi-publish@v1.8.11
+  #       with:
+  #         repository-url: https://test.pypi.org/legacy/
 
-  # Check that the testpypi installation works
-  test_testpypi:
-    needs: [upload_testpypi]
-    name: Test installation from TestPyPi
-    runs-on: ${{ matrix.os }}
+  # # Check that the testpypi installation works
+  # test_testpypi:
+  #   needs: [upload_testpypi]
+  #   name: Test installation from TestPyPi
+  #   runs-on: ${{ matrix.os }}
 
-    strategy:
-      # If one of the jobs fails, continue with the others.
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+  #   strategy:
+  #     # If one of the jobs fails, continue with the others.
+  #     fail-fast: false
+  #     matrix:
+  #       os: [ubuntu-latest, macos-latest]
 
-    steps:
-      - name: Python installation
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.9"
+  #   steps:
+  #     - name: Python installation
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: "3.9"
 
-      # We should also wait for index to update on remote server
-      - name: Install graph2mat + dependencies
-        run: |
-          sleep 10
-          version=${GITHUB_REF#refs/*/v}
-          version=${version#refs/*/}
-          python -m pip install --progress-bar=off --find-links dist --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ graph2mat[test]==${version}
-      - name: Test the installation
-        run: |
-          pytest --pyargs graph2mat
+  #     # We should also wait for index to update on remote server
+  #     - name: Install graph2mat + dependencies
+  #       run: |
+  #         sleep 10
+  #         version=${GITHUB_REF#refs/*/v}
+  #         version=${version#refs/*/}
+  #         python -m pip install --progress-bar=off --find-links dist --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ graph2mat[test]==${version}
+  #     - name: Test the installation
+  #       run: |
+  #         pytest --pyargs graph2mat
   # Upload to PyPI on every tag
   upload_pypi:
-    needs: [test_testpypi]
+    #needs: [test_testpypi]
     name: Publish package to Pypi
     runs-on: ubuntu-latest
     environment:
