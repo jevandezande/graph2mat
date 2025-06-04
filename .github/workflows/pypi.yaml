@@ -137,6 +137,7 @@ jobs:
   # Upload to PyPI on every tag
   upload_pypi:
     #needs: [test_testpypi]
+    needs: [build_sdist, build_wheels]
     name: Publish package to Pypi
     runs-on: ubuntu-latest
     environment:
