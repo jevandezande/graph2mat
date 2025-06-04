@@ -94,6 +94,7 @@ tools = [
     "pyyaml",
     "fastapi",
     "uvicorn",
+    "python-multipart",
     "plotly",
     "pandas",
     "pytorch-lightning",

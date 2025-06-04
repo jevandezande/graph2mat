@@ -389,8 +389,6 @@ class MatrixTimeSeriesState:
         self.add_next_config(next_config)
 
     def add_next_config(self, config):
-        print("ADDING CONFIG")
-        print(config.metadata["geometry"])
         self.configs.append(config)
 
     def add_last_matrix_ref(self, matrix_ref):
