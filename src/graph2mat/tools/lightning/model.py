@@ -1,20 +1,22 @@
 """Wrapping of raw models to use them in pytorch_lightning."""
 
-from pathlib import Path
-from typing import Type, Union, Optional
 import warnings
-
-from e3nn import o3
+import zipfile
+from pathlib import Path
+from typing import Optional, Type, Union
 
 import pytorch_lightning as pl
 import torch
+from e3nn import o3
+
+from graph2mat import AtomicTableWithEdges, BasisTableWithEdges, __version__
+from graph2mat.bindings.torch.load import sanitize_checkpoint
 
 # from context import mace
 from graph2mat.core.data.metrics import OrbitalMatrixMetric, block_type_mse
-from graph2mat import BasisTableWithEdges, AtomicTableWithEdges
-from graph2mat.bindings.torch.load import sanitize_checkpoint
 from graph2mat.core.data.node_feats import NodeFeature
-from graph2mat import __version__
+
+from ._helpers import glob, maybe_zip_path
 
 
 class LitBasisMatrixModel(pl.LightningModule):
@@ -39,12 +41,14 @@ class LitBasisMatrixModel(pl.LightningModule):
 
         self.save_hyperparameters()
 
+        root_dir = maybe_zip_path(root_dir)
+
         if basis_table is None:
             if basis_files is None:
                 self.basis_table = None
             else:
                 self.basis_table = AtomicTableWithEdges.from_basis_glob(
-                    Path(root_dir).glob(basis_files), no_basis_atoms=no_basis
+                    glob(root_dir, basis_files), no_basis_atoms=no_basis
                 )
         else:
             self.basis_table = basis_table

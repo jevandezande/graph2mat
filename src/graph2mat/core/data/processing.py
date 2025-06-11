@@ -21,29 +21,29 @@ if needed.
 """
 from __future__ import annotations
 
-from typing import (
-    Optional,
-    Tuple,
-    Union,
-    Dict,
-    Any,
-    Callable,
-    Sequence,
-    Generator,
-    List,
-    Generic,
-    TypeVar,
-    Iterable,
-)
+import dataclasses
+import warnings
+import zipfile
+from copy import copy
 from functools import cached_property
 from pathlib import Path
-import dataclasses
-from copy import copy
-import warnings
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Generator,
+    Generic,
+    Iterable,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
-import sisl
 import numpy as np
-
+import sisl
 import torch
 
 try:
@@ -54,11 +54,11 @@ except ImportError:
         pass
 
 
-from .neighborhood import get_neighborhood
 from .configuration import BasisConfiguration, OrbitalConfiguration, PhysicsMatrixType
-from .formats import conversions, Formats
-from .table import BasisTableWithEdges
+from .formats import Formats, conversions
+from .neighborhood import get_neighborhood
 from .node_feats import OneHotZ
+from .table import BasisTableWithEdges
 
 __all__ = ["MatrixDataProcessor", "BasisMatrixData"]
 
@@ -116,7 +116,7 @@ class MatrixDataProcessor:
         }.get(self.out_matrix, self.out_matrix or Formats.SCIPY_CSR)
 
     def get_config_kwargs(self, obj: Any) -> Dict[str, Any]:
-        if isinstance(obj, (str, Path)):
+        if isinstance(obj, (str, Path, zipfile.Path)):
             kwargs = {"out_matrix": self.out_matrix}
             if hasattr(self.basis_table, "atoms"):
                 kwargs["basis"] = self.basis_table.atoms

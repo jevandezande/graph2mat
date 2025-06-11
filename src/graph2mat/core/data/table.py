@@ -12,16 +12,15 @@ In a typical matrix, there will be elements that belong to connections between
 different points. Therefore, these tables also need to keep track of edge types.
 """
 
-from typing import List, Sequence, Union, Generator, Optional, Callable, Literal
-
 import itertools
-from pathlib import Path
 from io import StringIO
+from pathlib import Path
+from typing import Callable, Generator, List, Literal, Optional, Sequence, Union
 
 import numpy as np
 import sisl
 
-from .basis import PointBasis, BasisConvention, get_change_of_basis
+from .basis import BasisConvention, PointBasis, get_change_of_basis
 
 
 class BasisTableWithEdges:
@@ -616,7 +615,7 @@ class AtomicTableWithEdges(BasisTableWithEdges):
         basis = []
         # file_names = []
         # file_contents = []
-        for basis_file in sorted(basis_glob):
+        for basis_file in basis_glob:
             # TODO: Find out what to do with binary basis files formats
             # file_names.append(basis_file.name)
             # with open(basis_file, "r") as f:
