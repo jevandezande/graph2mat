@@ -1,30 +1,30 @@
 """Data loading for pytorch_lightning workflows."""
-from typing import Type, Union, List
-
 import json
-import math
-from pathlib import Path
-from typing import Optional
-import tempfile
 import logging
+import math
 import os
 import shutil
+import tempfile
+import zipfile
+from pathlib import Path
+from typing import List, Optional, Type, Union
 
-import pytorch_lightning as pl
 import numpy as np
+import pytorch_lightning as pl
 import torch.utils.data
-
 from torch_geometric.loader.dataloader import DataLoader
 
-from graph2mat.core.data.configuration import PhysicsMatrixType
-from graph2mat import BasisTableWithEdges, AtomicTableWithEdges, MatrixDataProcessor
-from graph2mat.core.data.node_feats import NodeFeature
-from graph2mat.bindings.torch.data import TorchBasisMatrixData
+from graph2mat import AtomicTableWithEdges, BasisTableWithEdges, MatrixDataProcessor
 from graph2mat.bindings.torch import (
-    TorchBasisMatrixDataset,
     InMemoryData,
     RotatingPoolData,
+    TorchBasisMatrixDataset,
 )
+from graph2mat.bindings.torch.data import TorchBasisMatrixData
+from graph2mat.core.data.configuration import PhysicsMatrixType
+from graph2mat.core.data.node_feats import NodeFeature
+
+from ._helpers import glob, maybe_clean_zip_path, maybe_zip_path
 
 
 class MatrixDataModule(pl.LightningDataModule):
@@ -56,7 +56,13 @@ class MatrixDataModule(pl.LightningDataModule):
             out_matrix :'density_matrix', 'hamiltonian', 'energy_density_matrix', 'dynamical_matrix'
             basis_files : Union[str, None]
             basis_table : Union[BasisTableWithEdges, None]
-            root_dir : str
+            root_dir :
+                Path to the directory to use as root for all other paths (in case those other paths
+                are relative). This root directory can also be a zip file.
+
+                Setting this argument is useful because it makes the config files/checkpoints easier
+                to transfer between different machines, as one then only needs to change the root
+                directory which presumably is the directory containiing the dataset.
             train_runs : Optional[str]
             val_runs : Optional[str]
             test_runs : Optional[str]
@@ -83,7 +89,7 @@ class MatrixDataModule(pl.LightningDataModule):
         super().__init__()
         self.save_hyperparameters()
 
-        self.root_dir = root_dir
+        self.root_dir = maybe_zip_path(root_dir)
 
         self.basis_files = basis_files
         self.no_basis = no_basis
@@ -134,7 +140,7 @@ class MatrixDataModule(pl.LightningDataModule):
             # Read the basis from the basis files provided.
             assert self.basis_files is not None
             self.basis_table = AtomicTableWithEdges.from_basis_glob(
-                Path(root).glob(self.basis_files), no_basis_atoms=self.no_basis
+                glob(root, self.basis_files), no_basis_atoms=self.no_basis
             )
 
         # Initialize the data.
@@ -147,9 +153,11 @@ class MatrixDataModule(pl.LightningDataModule):
         if self.runs_json is not None:
             json_path = Path(self.runs_json)
             if not json_path.is_absolute():
-                json_path = Path(root) / json_path
-            with open(json_path, "r") as f:
-                runs_dict = json.load(f)
+                json_path = maybe_clean_zip_path(root / json_path)
+
+            f = json_path.open("r")
+            runs_dict = json.load(f)
+            f.close()
         else:
             runs_dict = {}
 
@@ -166,10 +174,10 @@ class MatrixDataModule(pl.LightningDataModule):
             runs = getattr(self, "%s_runs" % split)
             if isinstance(runs, str):
                 # This is a glob pattern
-                runs = Path(root).glob(runs)
+                runs = glob(root, runs)
             # Else use the json file
             elif runs is None and split in runs_dict:
-                runs = [Path(root) / p for p in runs_dict[split]]
+                runs = [maybe_clean_zip_path(root / p) for p in runs_dict[split]]
 
             if runs is not None:
                 # Contruct the dataset

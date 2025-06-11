@@ -10,23 +10,21 @@ for training, validating or testing. When doing inference, the configurations
 will not have an associated matrix, since the matrix is what you are trying
 to calculate.
 """
-
-from typing import Optional, Union, Literal, Dict, Any, Sequence
-
 import warnings
-
-from pathlib import Path
+import zipfile
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, Literal, Optional, Sequence, Union
 
 import numpy as np
 import sisl
-from scipy.sparse import issparse, csr_array
+from scipy.sparse import csr_array, issparse
 
-from .basis import PointBasis, NoBasisAtom
-from .matrices import OrbitalMatrix, BasisMatrix, get_matrix_cls
-from .table import BasisTableWithEdges
-from .sparse import csr_to_block_dict
+from .basis import NoBasisAtom, PointBasis
 from .formats import Formats, conversions
+from .matrices import BasisMatrix, OrbitalMatrix, get_matrix_cls
+from .sparse import csr_to_block_dict
+from .table import BasisTableWithEdges
 
 Vector = np.ndarray  # [3,]
 Positions = np.ndarray  # [..., 3]
@@ -272,7 +270,7 @@ class OrbitalConfiguration(BasisConfiguration):
             return cls.from_geometry(obj, **kwargs)
         elif isinstance(obj, sisl.SparseOrbital):
             return cls.from_matrix(obj, labels=labels, **kwargs)
-        elif isinstance(obj, (str, Path)):
+        elif isinstance(obj, (str, Path, zipfile.Path)):
             if not labels:
                 kwargs["out_matrix"] = None
             return cls.from_run(obj, **kwargs)
@@ -507,7 +505,7 @@ def _sisl_run_to_orbitalconfiguration(
     # Initialize the file object for the main input file
     main_input = sisl.get_sile(runfilepath)
     # Build some metadata so that the OrbitalConfiguration object can be traced back to the run.
-    metadata = {"path": runfilepath}
+    metadata = {"path": str(runfilepath)}
 
     def _change_geometry_basis(geometry, basis):
         # new_atoms = geometry.atoms.copy()

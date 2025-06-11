@@ -1,18 +1,23 @@
 import logging
-from torch import multiprocessing
-from pathlib import Path
-from typing import Sequence, Union, Type, Optional, TypeVar, Generic
+import os
 import threading
+import zipfile
+from copy import deepcopy
+from pathlib import Path
+from typing import Generic, Optional, Sequence, Type, TypeVar, Union
 
 import numpy as np
 import sisl
-
 import torch.utils.data
+from torch import multiprocessing
 
 from graph2mat import BasisConfiguration, MatrixDataProcessor
+
 from .data import TorchBasisMatrixData
 
 __all__ = ["TorchBasisMatrixDataset", "InMemoryData", "RotatingPoolData"]
+
+reading = False
 
 
 class TorchBasisMatrixDataset(torch.utils.data.Dataset):
@@ -87,15 +92,60 @@ class TorchBasisMatrixDataset(torch.utils.data.Dataset):
         self.data_cls = data_cls
         self.load_labels = load_labels
 
+        self._root_pid = os.getpid()
+        self._worker_pid = None
+
     def __len__(self):
         return len(self.input_data)
 
     def __getitem__(self, index: int) -> TorchBasisMatrixData:
         item = self.input_data[index]
 
+        self._fix_multiprocessing_zipfile(item)
+
         return self.data_cls.new(
             item, data_processor=self.data_processor, labels=self.load_labels
         )
+
+    def _fix_multiprocessing_zipfile(self, item):
+        """Fix issues with zipfiles when using multiprocessing.
+
+        The buffered reader of zipfile for some reason can't be shared
+        between processes. This function checks if
+            1. The item is a zipfile.Path
+            2. We are in a different process than the one that created the zipfile
+
+        If so, it substitutes the buffered reader of the zipfile with a new one.
+        This is done only once because (we assume) the zipfile is shared between
+        all zipfile.Path.
+
+        An alternative would be to substitute the zipfile with a new one, but then
+        you'd have to do it for each item, because they all have a reference to the
+        original zipfile.
+
+        By just substituting the buffered reader, the zipfile also keeps the
+        table used to access files fast. If we substituted the zipfile, it would
+        need to re-read the table, which takes some time if the file is large.
+        """
+
+        if self._worker_pid is not None:
+            # We already dealt with multiprocessing
+            return item
+
+        # Get the id of the process we are in, and store it so that we
+        # can later skip if it is already saved.
+        self._worker_pid = os.getpid()
+
+        if isinstance(item, zipfile.Path) and self._worker_pid != self._root_pid:
+            # Init a zipfile so that it inits a new buffered reader
+            aux_zip = zipfile.ZipFile(item.root.filename)
+            # Set the buffered reader to the new one
+            item.root.fp = aux_zip.fp
+            # Unlink the buffered reader from the auxiliary zipfile
+            # so that it doesn't get closed on garbage collection
+            aux_zip.fp = None
+
+        return item
 
 
 class InMemoryData(torch.utils.data.Dataset):
