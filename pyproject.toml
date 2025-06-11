@@ -81,13 +81,13 @@ torch = [
 ]
 
 e3nn = [
-    "torch<=2.5",
+    "torch",
     "torch_geometric",
     "e3nn"
 ]
 
 mace = [
-    "torch<=2.5",
+    "torch",
     "torch_geometric",
     "mace_torch"
 ]
