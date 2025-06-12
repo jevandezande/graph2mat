@@ -18,8 +18,7 @@ complex and relevant use cases.
 
 .. warning::
 
-    This tutorial assumes that you have ``SIESTA`` installed (ideally with ``lua`` support, or you'll miss some parts!).
-
+    This tutorial assumes that you have ``SIESTA`` installed with ``lua`` scripting support.
     You can install it with ``conda``:
 
     .. code-block:: bash
