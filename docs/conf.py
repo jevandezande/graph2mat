@@ -59,6 +59,7 @@ extensions = [
     # "IPython.sphinxext.ipython_directive",
     # "IPython.sphinxext.ipython_console_highlighting",
     "sphinx.ext.inheritance_diagram",
+    "sphinx_copybutton",
     "nbsphinx",
     # "sphinx_gallery.load_style",
     # bibtex stuff

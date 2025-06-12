@@ -117,6 +117,7 @@ docs = [
     "jsonargparse[signatures]",
     "jinja2",
     "sphinx",
+    "sphinx-copybutton",
     "sphinx_autodoc_typehints",
     "sphinx_rtd_theme",
     "nbsphinx",
