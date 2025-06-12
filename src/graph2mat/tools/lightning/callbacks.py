@@ -8,19 +8,19 @@ disk or progress tracking.
 This module implements some callbacks that might be useful in particular
 for the matrix learning process.
 """
-from pathlib import Path
-from typing import Sequence, Union, Literal, Dict, Any, Type
-import io
 import csv
+import io
+from pathlib import Path
+from typing import Any, Dict, Literal, Sequence, Type, Union
 
-import pytorch_lightning as pl
-from pytorch_lightning.callbacks import BasePredictionWriter, Callback
-import sisl
 import numpy as np
+import pytorch_lightning as pl
+import sisl
+from pytorch_lightning.callbacks import BasePredictionWriter, Callback
 
-from graph2mat import MatrixDataProcessor, AtomicTableWithEdges
-from graph2mat.core.data.sparse import nodes_and_edges_to_sparse_orbital
+from graph2mat import AtomicTableWithEdges, MatrixDataProcessor
 from graph2mat.core.data.metrics import OrbitalMatrixMetric
+from graph2mat.core.data.sparse import nodes_and_edges_to_sparse_orbital
 from graph2mat.tools.viz import plot_basis_matrix
 
 
@@ -88,7 +88,7 @@ class MatrixWriter(Callback):
             )
 
             # Get the path from which this structure was read.
-            path = matrix_data.metadata.get("path", Path())
+            path = Path(matrix_data.metadata.get("path", Path()))
             out_file = Path(self.output_file.replace("$name$", path.parent.name))
             if not self.out_is_absolute:
                 out_file = path.parent / out_file
