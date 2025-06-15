@@ -116,6 +116,9 @@ class BasisConfiguration:
     #: A dictionary with additional metadata related to the configuration.
     metadata: Optional[Dict[str, Any]] = None
 
+    #: The graph2mat format that identifies this class.
+    _cls_format: str = Formats.BASISCONFIGURATION
+
     def __post_init__(self):
         if isinstance(self.basis, BasisTableWithEdges):
             # If the basis is a table, we need to convert it to a list of PointBasis objects
@@ -147,6 +150,128 @@ class BasisConfiguration:
         return conversions.get_converter(
             Formats.BASISCONFIGURATION, Formats.SISL_GEOMETRY
         )(self)
+
+    @classmethod
+    def new(
+        cls,
+        obj: Union[sisl.Geometry, sisl.SparseOrbital, str, Path],
+        labels: bool = True,
+        **kwargs,
+    ) -> "BasisConfiguration":
+        """Creates a new configuration.
+
+        This is just a dispatcher that will call the appropriate method to create
+        the object depending on the type of the input.
+
+        Parameters
+        -----------
+        obj:
+            The object from which to create the configuration.
+        labels:
+            Whether to find labels (the matrix) to be assigned to the configuration.
+        **kwargs:
+            Additional arguments to be passed to the constructor of the configuration.
+
+        See Also
+        ---------
+        from_geometry, from_matrix, from_run
+            The methods that are called by this dispatcher to create the new configuration,
+            depending on the type of `obj`.
+        """
+        if isinstance(obj, sisl.Geometry):
+            if labels:
+                raise ValueError(
+                    "Cannot infer output labels only from a geometry. Please provide either a matrix or a path to a run file."
+                )
+            return cls.from_geometry(obj, **kwargs)
+        elif isinstance(obj, sisl.SparseOrbital):
+            return cls.from_matrix(obj, labels=labels, **kwargs)
+        elif isinstance(obj, (str, Path, zipfile.Path)):
+            if not labels:
+                kwargs["out_matrix"] = None
+            return cls.from_run(obj, **kwargs)
+        else:
+            raise TypeError(
+                f"Cannot create {cls.__name__} from {obj.__class__.__name__}."
+            )
+
+    @classmethod
+    def from_geometry(cls, geometry: sisl.Geometry, **kwargs) -> "BasisConfiguration":
+        """Initializes a configuration from a sisl geometry.
+
+        Note that the created object will not have an associated matrix, unless it is passed
+        explicitly as a keyword argument.
+
+        Parameters
+        -----------
+        geometry: sisl.Geometry
+            The geometry to associate to the configuration.
+        **kwargs:
+            Additional arguments to be passed to the configuration constructor.
+        """
+        converter = conversions.get_converter(Formats.SISL_GEOMETRY, cls._cls_format)
+        return converter(geometry, cls=cls, **kwargs)
+
+    @classmethod
+    def from_matrix(
+        cls,
+        matrix: sisl.SparseOrbital,
+        geometry: Union[sisl.Geometry, None] = None,
+        labels: bool = True,
+        **kwargs,
+    ) -> "BasisConfiguration":
+        """Initializes a configuration from a sisl matrix.
+
+        Parameters
+        -----------
+        matrix: sisl.SparseOrbital
+            The matrix to associate to the configuration. This matrix should have an associated
+            geometry, which will be used.
+        geometry: sisl.Geometry, optional
+            The geometry to associate to the configuration. If None, the geometry of the matrix
+            will be used.
+        labels: bool
+            Whether to process the labels from the matrix. If False, the only thing to read
+            will be the atomic structure, which is likely the input of your model.
+        **kwargs:
+            Additional arguments to be passed to the configuration constructor.
+        """
+        converter = conversions.get_converter(Formats.SISL, cls._cls_format)
+        return converter(matrix, geometry=geometry, labels=labels, cls=cls, **kwargs)
+
+    @classmethod
+    def from_run(
+        cls,
+        runfilepath: Union[str, Path],
+        geometry_path: Optional[Union[str, Path]] = None,
+        out_matrix: Optional[PhysicsMatrixType] = None,
+        basis: Optional[sisl.Atoms] = None,
+    ) -> "BasisConfiguration":
+        """Initializes configuration from the main input file of a run.
+
+        Parameters
+        -----------
+        runfilepath:
+            The path of the main input file. E.g. in SIESTA this is the path to the ".fdf" file
+        geometry_path:
+            The path to the geometry file. If None, the geometry will be read from the run file.
+        out_matrix:
+            The matrix to be read from the output of the run. The configuration object will
+            contain the matrix.
+            If it is None, then no matrices are read from the output. This is the case when trying to
+            predict matrices, since you don't have the output yet.
+        basis:
+            The basis to use for the configuration. If None, the basis of the read geometry
+            will be used.
+        """
+        converter = conversions.get_converter(Formats.SISL_SILE, cls._cls_format)
+        return converter(
+            runfilepath,
+            geometry_path=geometry_path,
+            out_matrix=out_matrix,
+            basis=basis,
+            cls=cls,
+        )
 
 
 @dataclass
@@ -225,6 +350,9 @@ class OrbitalConfiguration(BasisConfiguration):
     #: A dictionary with additional metadata related to the configuration.
     metadata: Optional[Dict[str, Any]] = None
 
+    #: The graph2mat format that identifies this class.
+    _cls_format: str = Formats.ORBITALCONFIGURATION
+
     @property
     def atom_types(self) -> np.ndarray:
         """Alias for point_types."""
@@ -234,136 +362,6 @@ class OrbitalConfiguration(BasisConfiguration):
     def atoms(self) -> sisl.Atoms:
         """Alias for basis."""
         return self.basis
-
-    @classmethod
-    def new(
-        cls,
-        obj: Union[sisl.Geometry, sisl.SparseOrbital, str, Path],
-        labels: bool = True,
-        **kwargs,
-    ) -> "OrbitalConfiguration":
-        """Creates a new `OrbitalConfiguration`.
-
-        This is just a dispatcher that will call the appropriate method to create
-        the object depending on the type of the input.
-
-        Parameters
-        -----------
-        obj:
-            The object from which to create the OrbitalConfiguration.
-        labels:
-            Whether to find labels (the matrix) to be assigned to the configuration.
-        **kwargs:
-            Additional arguments to be passed to the constructor of the OrbitalConfiguration.
-
-        See Also
-        ---------
-        from_geometry, from_matrix, from_run
-            The methods that are called by this dispatcher to create the new `OrbitalConfiguration`,
-            depending on the type of `obj`.
-        """
-        if isinstance(obj, sisl.Geometry):
-            if labels:
-                raise ValueError(
-                    "Cannot infer output labels only from a geometry. Please provide either a matrix or a path to a run file."
-                )
-            return cls.from_geometry(obj, **kwargs)
-        elif isinstance(obj, sisl.SparseOrbital):
-            return cls.from_matrix(obj, labels=labels, **kwargs)
-        elif isinstance(obj, (str, Path, zipfile.Path)):
-            if not labels:
-                kwargs["out_matrix"] = None
-            return cls.from_run(obj, **kwargs)
-        else:
-            raise TypeError(
-                f"Cannot create OrbitalConfiguration from {obj.__class__.__name__}."
-            )
-
-    @classmethod
-    def from_geometry(cls, geometry: sisl.Geometry, **kwargs) -> "OrbitalConfiguration":
-        """Initializes an OrbitalConfiguration object from a sisl geometry.
-
-        Note that the created object will not have an associated matrix, unless it is passed
-        explicitly as a keyword argument.
-
-        Parameters
-        -----------
-        geometry: sisl.Geometry
-            The geometry to associate to the OrbitalConfiguration.
-        **kwargs:
-            Additional arguments to be passed to the OrbitalConfiguration constructor.
-        """
-        converter = conversions.get_converter(
-            Formats.SISL_GEOMETRY, Formats.ORBITALCONFIGURATION
-        )
-        return converter(geometry, cls=cls, **kwargs)
-
-    @classmethod
-    def from_matrix(
-        cls,
-        matrix: sisl.SparseOrbital,
-        geometry: Union[sisl.Geometry, None] = None,
-        labels: bool = True,
-        **kwargs,
-    ) -> "OrbitalConfiguration":
-        """Initializes an OrbitalConfiguration object from a sisl matrix.
-
-        Parameters
-        -----------
-        matrix: sisl.SparseOrbital
-            The matrix to associate to the OrbitalConfiguration. This matrix should have an associated
-            geometry, which will be used.
-        geometry: sisl.Geometry, optional
-            The geometry to associate to the OrbitalConfiguration. If None, the geometry of the matrix
-            will be used.
-        labels: bool
-            Whether to process the labels from the matrix. If False, the only thing to read
-            will be the atomic structure, which is likely the input of your model.
-        **kwargs:
-            Additional arguments to be passed to the OrbitalConfiguration constructor.
-        """
-        converter = conversions.get_converter(
-            Formats.SISL, Formats.ORBITALCONFIGURATION
-        )
-        return converter(matrix, geometry=geometry, labels=labels, cls=cls, **kwargs)
-
-    @classmethod
-    def from_run(
-        cls,
-        runfilepath: Union[str, Path],
-        geometry_path: Optional[Union[str, Path]] = None,
-        out_matrix: Optional[PhysicsMatrixType] = None,
-        basis: Optional[sisl.Atoms] = None,
-    ) -> "OrbitalConfiguration":
-        """Initializes an OrbitalConfiguration object from the main input file of a run.
-
-        Parameters
-        -----------
-        runfilepath:
-            The path of the main input file. E.g. in SIESTA this is the path to the ".fdf" file
-        geometry_path:
-            The path to the geometry file. If None, the geometry will be read from the run file.
-        out_matrix:
-            The matrix to be read from the output of the run. The configuration object will
-            contain the matrix.
-            If it is None, then no matrices are read from the output. This is the case when trying to
-            predict matrices, since you don't have the output yet.
-        cls:
-            Class to initialize, should be a subclass of ``OrbitalConfiguration``.
-        basis:
-            The basis to use for the configuration. If None, the basis of the read geometry
-            will be used.
-        """
-        converter = conversions.get_converter(
-            Formats.SISL_SILE, Formats.ORBITALCONFIGURATION
-        )
-        return converter(
-            runfilepath,
-            geometry_path=geometry_path,
-            out_matrix=out_matrix,
-            basis=basis,
-            cls=cls,
-        )
 
 
 # ---------------------------------------
@@ -375,6 +373,28 @@ Formats.add_alias(Formats.ORBITALCONFIGURATION, OrbitalConfiguration)
 
 # Conversions from/to BasisConfiguration classes
 converter = conversions.converter
+
+
+@converter
+def _orbitalconfiguration_to_basisconfiguration(
+    config: OrbitalConfiguration,
+) -> BasisConfiguration:
+    """Converts an OrbitalConfiguration to a BasisConfiguration.
+
+    The only thing that this function does is to convert the ``basis`` attribute
+    from a list of sisl atoms to a list of ``PointBasis`` objects.
+    """
+    return BasisConfiguration(
+        point_types=config.point_types,
+        positions=config.positions,
+        basis=[PointBasis.from_sisl_atom(p) for p in config.basis],
+        cell=config.cell,
+        pbc=config.pbc,
+        matrix=config.matrix,
+        weight=config.weight,
+        config_type=config.config_type,
+        metadata=config.metadata,
+    )
 
 
 @converter
